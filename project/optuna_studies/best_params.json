@@ -1,0 +1,26 @@
+{
+  "scalp": {
+    "boosting_type": "gbdt",
+    "num_leaves": 67,
+    "max_depth": 5,
+    "learning_rate": 0.018659959624904916,
+    "n_estimators": 526,
+    "min_child_samples": 55,
+    "subsample": 0.7159725093210578,
+    "colsample_bytree": 0.645614570099021,
+    "reg_alpha": 0.0032112643094417484,
+    "reg_lambda": 1.8007140198129195e-07
+  },
+  "intraday": {
+    "boosting_type": "gbdt",
+    "num_leaves": 67,
+    "max_depth": 5,
+    "learning_rate": 0.018659959624904916,
+    "n_estimators": 526,
+    "min_child_samples": 55,
+    "subsample": 0.7159725093210578,
+    "colsample_bytree": 0.645614570099021,
+    "reg_alpha": 0.0032112643094417484,
+    "reg_lambda": 1.8007140198129195e-07
+  }
+}

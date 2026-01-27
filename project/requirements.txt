@@ -1,0 +1,31 @@
+# Core ML
+python>=3.10
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+scikit-learn>=1.3.0
+lightgbm>=4.0.0
+joblib>=1.3.0
+
+# Hyperparameter Optimization
+optuna>=3.0.0
+
+# ONNX Export/Inference
+onnx>=1.14.0
+onnxmltools>=1.11.0
+onnxruntime>=1.15.0  # or onnxruntime-gpu for GPU
+
+# Binance / Data
+python-binance>=1.0.19
+requests>=2.31.0
+websockets>=11.0.0
+
+# Trading / Backtesting
+optinus>=0.1.0
+
+# Visualization / Analysis
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Technical Analysis
+ta>=0.10.2

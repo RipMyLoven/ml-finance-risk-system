@@ -1,0 +1,38 @@
+[
+  {
+    "symbol": "APTUSD",
+    "direction": "SHORT",
+    "confidence": 0.4309647869263526,
+    "entry_price": 1.981,
+    "entry_range": "1.98-1.98",
+    "stop_loss": 1.9894093837888185,
+    "take_profit_1": 1.9641812324223633,
+    "take_profit_2": 1.955771848633545,
+    "leverage": 1,
+    "risk_percent": 0.017,
+    "position_size_pct": 0.017,
+    "timeframe": "intraday",
+    "risk_score": 0.5,
+    "expected_return": -0.22004719536747996,
+    "generated_at": "2026-01-27T20:09:43.648462",
+    "valid_until": null
+  },
+  {
+    "symbol": "LINKUSD",
+    "direction": "SHORT",
+    "confidence": 0.43339885383967136,
+    "entry_price": 20.296,
+    "entry_range": "20.30-20.32",
+    "stop_loss": 20.391094117413267,
+    "take_profit_1": 20.105811765173463,
+    "take_profit_2": 20.010717647760195,
+    "leverage": 1,
+    "risk_percent": 0.017,
+    "position_size_pct": 0.017,
+    "timeframe": "intraday",
+    "risk_score": 0.5,
+    "expected_return": -0.1430949205687581,
+    "generated_at": "2026-01-27T20:09:43.648474",
+    "valid_until": null
+  }
+]
