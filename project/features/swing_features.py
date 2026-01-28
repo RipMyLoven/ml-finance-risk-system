@@ -273,6 +273,152 @@ def add_volume_swing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_derivatives_features_swing(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Derivatives features для Swing модели
+    
+    Использует данные из data_loader_v2:
+    - funding_rate
+    - sum_open_interest
+    - long_short_ratio, long_account, short_account
+    - buy_sell_ratio, buy_vol, sell_vol
+    - lastFundingRate (premium index)
+    """
+    # Adaptive windows for swing
+    min_w = max(5, len(df) // 10)
+    
+    # =========================
+    # Funding Rate Features (long-term)
+    # =========================
+    if 'funding_rate' in df.columns:
+        fr = df['funding_rate'].fillna(0)
+        
+        # Cumulative funding (как индикатор рыночного настроения)
+        df['funding_cumsum_7d'] = fr.rolling(min(7 * 3, min_w * 3)).sum()  # ~7 дней (3 funding в день)
+        df['funding_cumsum_30d'] = fr.rolling(min(30 * 3, min_w * 6)).sum()  # ~30 дней
+        
+        # Funding trend
+        df['funding_ma_7d'] = fr.rolling(min(21, min_w * 2)).mean()
+        df['funding_ma_30d'] = fr.rolling(min(90, min_w * 4)).mean()
+        df['funding_trend'] = df['funding_ma_7d'] - df['funding_ma_30d']
+        
+        # Extreme funding (overheated market)
+        funding_std = fr.rolling(min(90, min_w * 4)).std()
+        df['funding_zscore_swing'] = (fr - df['funding_ma_30d']) / (funding_std + 1e-10)
+        df['funding_extreme_long'] = (df['funding_zscore_swing'] > 2).astype(int)
+        df['funding_extreme_short'] = (df['funding_zscore_swing'] < -2).astype(int)
+    else:
+        df['funding_cumsum_7d'] = 0
+        df['funding_cumsum_30d'] = 0
+        df['funding_ma_7d'] = 0
+        df['funding_ma_30d'] = 0
+        df['funding_trend'] = 0
+        df['funding_zscore_swing'] = 0
+        df['funding_extreme_long'] = 0
+        df['funding_extreme_short'] = 0
+    
+    # =========================
+    # Open Interest Features (long-term)
+    # =========================
+    if 'sum_open_interest' in df.columns:
+        oi = df['sum_open_interest'].fillna(method='ffill')
+        
+        # OI trend
+        df['oi_ma_7d'] = oi.rolling(min(7, min_w)).mean()
+        df['oi_ma_30d'] = oi.rolling(min(30, min_w * 3)).mean()
+        df['oi_trend_swing'] = df['oi_ma_7d'] / (df['oi_ma_30d'] + 1e-10) - 1
+        
+        # OI change (weekly, monthly)
+        df['oi_change_7d'] = oi.pct_change(min(7, min_w))
+        df['oi_change_30d'] = oi.pct_change(min(30, min_w * 3))
+        
+        # OI vs Price divergence (long-term)
+        price_change_30d = df['close'].pct_change(min(30, min_w * 3))
+        df['oi_price_div_swing'] = df['oi_change_30d'] - price_change_30d
+        
+        # OI at extremes
+        oi_std = oi.rolling(min(90, min_w * 4)).std()
+        oi_mean = oi.rolling(min(90, min_w * 4)).mean()
+        df['oi_zscore_swing'] = (oi - oi_mean) / (oi_std + 1e-10)
+    else:
+        df['oi_ma_7d'] = 0
+        df['oi_ma_30d'] = 0
+        df['oi_trend_swing'] = 0
+        df['oi_change_7d'] = 0
+        df['oi_change_30d'] = 0
+        df['oi_price_div_swing'] = 0
+        df['oi_zscore_swing'] = 0
+    
+    # =========================
+    # Long/Short Ratio Features
+    # =========================
+    if 'long_short_ratio' in df.columns:
+        ls = df['long_short_ratio'].fillna(1)
+        
+        # LS ratio trend
+        df['ls_ma_7d'] = ls.rolling(min(7, min_w)).mean()
+        df['ls_ma_30d'] = ls.rolling(min(30, min_w * 3)).mean()
+        df['ls_trend_swing'] = df['ls_ma_7d'] / (df['ls_ma_30d'] + 1e-10) - 1
+        
+        # Extreme positioning
+        ls_std = ls.rolling(min(90, min_w * 4)).std()
+        ls_mean = ls.rolling(min(90, min_w * 4)).mean()
+        df['ls_zscore_swing'] = (ls - ls_mean) / (ls_std + 1e-10)
+        
+        # Crowd positioning extremes
+        df['crowd_extreme_long'] = (df['ls_zscore_swing'] > 1.5).astype(int)
+        df['crowd_extreme_short'] = (df['ls_zscore_swing'] < -1.5).astype(int)
+    else:
+        df['ls_ma_7d'] = 1
+        df['ls_ma_30d'] = 1
+        df['ls_trend_swing'] = 0
+        df['ls_zscore_swing'] = 0
+        df['crowd_extreme_long'] = 0
+        df['crowd_extreme_short'] = 0
+    
+    # =========================
+    # Taker Volume Features  
+    # =========================
+    if 'buy_sell_ratio' in df.columns:
+        bsr = df['buy_sell_ratio'].fillna(1)
+        
+        # Taker ratio trend
+        df['taker_ma_7d'] = bsr.rolling(min(7, min_w)).mean()
+        df['taker_ma_30d'] = bsr.rolling(min(30, min_w * 3)).mean()
+        df['taker_trend_swing'] = df['taker_ma_7d'] - df['taker_ma_30d']
+        
+        # Cumulative taker pressure
+        df['taker_cumsum_7d'] = (bsr - 1).rolling(min(7, min_w)).sum()
+    else:
+        df['taker_ma_7d'] = 1
+        df['taker_ma_30d'] = 1
+        df['taker_trend_swing'] = 0
+        df['taker_cumsum_7d'] = 0
+    
+    # =========================
+    # Premium Index / Basis
+    # =========================
+    if 'lastFundingRate' in df.columns:
+        premium = df['lastFundingRate'].fillna(0)
+        
+        # Premium trend
+        df['premium_ma_7d'] = premium.rolling(min(7, min_w)).mean()
+        df['premium_ma_30d'] = premium.rolling(min(30, min_w * 3)).mean()
+        df['premium_trend_swing'] = df['premium_ma_7d'] - df['premium_ma_30d']
+        
+        # Basis persistence
+        df['basis_persistent_pos'] = (premium > 0).rolling(min(7, min_w)).mean()
+        df['basis_persistent_neg'] = (premium < 0).rolling(min(7, min_w)).mean()
+    else:
+        df['premium_ma_7d'] = 0
+        df['premium_ma_30d'] = 0
+        df['premium_trend_swing'] = 0
+        df['basis_persistent_pos'] = 0.5
+        df['basis_persistent_neg'] = 0.5
+    
+    return df
+
+
 def add_target_swing(df: pd.DataFrame, horizon: int = 7, threshold: float = 0.03) -> pd.DataFrame:
     """
     Target для swing модели
@@ -314,6 +460,7 @@ def build_swing_features(
     df = add_momentum_swing(df)
     df = add_support_resistance(df)
     df = add_volume_swing(df)
+    df = add_derivatives_features_swing(df)  # NEW: derivatives features
     df = add_target_swing(df, horizon, threshold)
     
     df = df.dropna()
@@ -327,7 +474,16 @@ def build_swing_features(
         'high_20d', 'low_20d', 'high_50d', 'low_50d',
         'regime', 'regime_duration', 'btc_dominance', 'ad_line',
         'open_time', 'close_time', 'timestamp', 'datetime', 'date', 'time',
-        'symbol', 'buy_volume', 'sell_volume', 'trades_count'
+        'symbol', 'buy_volume', 'sell_volume', 'trades_count',
+        # Raw derivatives columns
+        'funding_rate', 'funding_time', 'mark_price',
+        'sum_open_interest', 'sum_open_interest_value',
+        'long_short_ratio', 'long_account', 'short_account',
+        'buy_sell_ratio', 'buy_vol', 'sell_vol',
+        'lastFundingRate', 'interestRate', 'indexPrice', 'estimatedSettlePrice',
+        'oi_ma_7d', 'oi_ma_30d', 'ls_ma_7d', 'ls_ma_30d',
+        'funding_ma_7d', 'funding_ma_30d', 'taker_ma_7d', 'taker_ma_30d',
+        'premium_ma_7d', 'premium_ma_30d'
     ]
     
     feature_names = [col for col in df.columns if col not in exclude_cols
@@ -358,5 +514,12 @@ SWING_FEATURE_NAMES = [
     'roc_10', 'roc_20', 'roc_50', 'price_momentum', 'rsi_momentum',
     'range_position_20d', 'range_position_50d',
     'dist_to_high_20d', 'dist_to_low_20d', 'breakout_high', 'breakdown_low',
-    'volume_ratio', 'volume_trend', 'ad_slope', 'cmf'
+    'volume_ratio', 'volume_trend', 'ad_slope', 'cmf',
+    # Derivatives features
+    'funding_cumsum_7d', 'funding_cumsum_30d', 'funding_trend',
+    'funding_zscore_swing', 'funding_extreme_long', 'funding_extreme_short',
+    'oi_trend_swing', 'oi_change_7d', 'oi_change_30d', 'oi_price_div_swing', 'oi_zscore_swing',
+    'ls_trend_swing', 'ls_zscore_swing', 'crowd_extreme_long', 'crowd_extreme_short',
+    'taker_trend_swing', 'taker_cumsum_7d',
+    'premium_trend_swing', 'basis_persistent_pos', 'basis_persistent_neg'
 ]

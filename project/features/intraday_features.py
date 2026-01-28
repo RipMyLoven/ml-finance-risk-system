@@ -82,9 +82,28 @@ def add_funding_features(df: pd.DataFrame, funding_rate: pd.Series = None) -> pd
     """
     Funding rate features
     
-    Если funding_rate не передан, создаём пустые колонки
+    Если funding_rate в df или передан отдельно
     """
-    if funding_rate is not None and len(funding_rate) > 0:
+    # Проверяем есть ли funding_rate в данных
+    if 'funding_rate' in df.columns and df['funding_rate'].notna().any():
+        # Funding rate change
+        df['funding_change'] = df['funding_rate'].diff() * 1000  # Нормализуем
+        df['funding_change_3'] = df['funding_rate'].diff(3) * 1000
+        
+        # Funding momentum
+        df['funding_sma'] = df['funding_rate'].rolling(8).mean() * 1000
+        df['funding_vs_sma'] = (df['funding_rate'] - df['funding_rate'].rolling(8).mean()) * 1000
+        
+        # Extreme funding
+        df['funding_extreme_pos'] = (df['funding_rate'] > 0.001).astype(int)
+        df['funding_extreme_neg'] = (df['funding_rate'] < -0.001).astype(int)
+        
+        # Funding zscore
+        df['funding_zscore'] = (
+            (df['funding_rate'] - df['funding_rate'].rolling(24).mean()) / 
+            (df['funding_rate'].rolling(24).std() + 1e-10)
+        )
+    elif funding_rate is not None and len(funding_rate) > 0:
         # Merge funding rate
         df = df.merge(
             funding_rate.to_frame('funding_rate'),
@@ -95,25 +114,26 @@ def add_funding_features(df: pd.DataFrame, funding_rate: pd.Series = None) -> pd
         df['funding_rate'] = df['funding_rate'].fillna(method='ffill')
         
         # Funding rate change
-        df['funding_change'] = df['funding_rate'].diff()
-        df['funding_change_3'] = df['funding_rate'].diff(3)
+        df['funding_change'] = df['funding_rate'].diff() * 1000
+        df['funding_change_3'] = df['funding_rate'].diff(3) * 1000
         
         # Funding momentum
-        df['funding_sma'] = df['funding_rate'].rolling(8).mean()
-        df['funding_vs_sma'] = df['funding_rate'] - df['funding_sma']
+        df['funding_sma'] = df['funding_rate'].rolling(8).mean() * 1000
+        df['funding_vs_sma'] = (df['funding_rate'] - df['funding_rate'].rolling(8).mean()) * 1000
         
         # Extreme funding
         df['funding_extreme_pos'] = (df['funding_rate'] > 0.001).astype(int)
         df['funding_extreme_neg'] = (df['funding_rate'] < -0.001).astype(int)
+        df['funding_zscore'] = 0
     else:
         # Placeholder columns
-        df['funding_rate'] = 0
         df['funding_change'] = 0
         df['funding_change_3'] = 0
         df['funding_sma'] = 0
         df['funding_vs_sma'] = 0
         df['funding_extreme_pos'] = 0
         df['funding_extreme_neg'] = 0
+        df['funding_zscore'] = 0
     
     return df
 
@@ -124,7 +144,30 @@ def add_oi_features(df: pd.DataFrame, oi_data: pd.Series = None) -> pd.DataFrame
     
     OI delta показывает приток/отток денег
     """
-    if oi_data is not None and len(oi_data) > 0:
+    # Проверяем есть ли OI в данных
+    if 'sum_open_interest' in df.columns and df['sum_open_interest'].notna().any():
+        # OI change
+        df['oi_change'] = df['sum_open_interest'].pct_change()
+        df['oi_change_3'] = df['sum_open_interest'].pct_change(3)
+        df['oi_change_10'] = df['sum_open_interest'].pct_change(10)
+        
+        # OI trend
+        oi_sma = df['sum_open_interest'].rolling(10).mean()
+        df['oi_vs_sma'] = df['sum_open_interest'] / (oi_sma + 1e-10) - 1
+        
+        # OI momentum
+        df['oi_momentum'] = df['oi_change'].diff()
+        
+        # Price-OI divergence
+        price_change = df['close'].pct_change()
+        df['price_oi_corr'] = price_change.rolling(10).corr(df['oi_change'])
+        
+        # OI zscore
+        df['oi_zscore'] = (
+            (df['sum_open_interest'] - df['sum_open_interest'].rolling(24).mean()) / 
+            (df['sum_open_interest'].rolling(24).std() + 1e-10)
+        )
+    elif oi_data is not None and len(oi_data) > 0:
         df = df.merge(
             oi_data.to_frame('open_interest'),
             left_index=True,
@@ -140,7 +183,7 @@ def add_oi_features(df: pd.DataFrame, oi_data: pd.Series = None) -> pd.DataFrame
         
         # OI trend
         oi_sma = df['open_interest'].rolling(10).mean()
-        df['oi_vs_sma'] = df['open_interest'] / oi_sma - 1
+        df['oi_vs_sma'] = df['open_interest'] / (oi_sma + 1e-10) - 1
         
         # OI momentum
         df['oi_momentum'] = df['oi_change'].diff()
@@ -148,15 +191,84 @@ def add_oi_features(df: pd.DataFrame, oi_data: pd.Series = None) -> pd.DataFrame
         # Price-OI divergence
         price_change = df['close'].pct_change()
         df['price_oi_corr'] = price_change.rolling(10).corr(df['oi_change'])
+        df['oi_zscore'] = 0
     else:
         # Placeholder columns
-        df['open_interest'] = 0
         df['oi_change'] = 0
         df['oi_change_3'] = 0
         df['oi_change_10'] = 0
         df['oi_vs_sma'] = 0
         df['oi_momentum'] = 0
         df['price_oi_corr'] = 0
+        df['oi_zscore'] = 0
+    
+    return df
+
+
+def add_ls_ratio_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Long/Short Ratio features"""
+    if 'long_short_ratio' in df.columns and df['long_short_ratio'].notna().any():
+        df['ls_ratio_norm'] = df['long_short_ratio'] - 1  # Центрируем вокруг 1
+        df['ls_ratio_sma'] = df['ls_ratio_norm'].rolling(8).mean()
+        df['ls_ratio_change'] = df['long_short_ratio'].pct_change()
+        df['ls_ratio_zscore'] = (
+            (df['long_short_ratio'] - df['long_short_ratio'].rolling(24).mean()) / 
+            (df['long_short_ratio'].rolling(24).std() + 1e-10)
+        )
+        
+        if 'long_account' in df.columns:
+            df['long_short_diff'] = df['long_account'] - df['short_account']
+    else:
+        df['ls_ratio_norm'] = 0
+        df['ls_ratio_sma'] = 0
+        df['ls_ratio_change'] = 0
+        df['ls_ratio_zscore'] = 0
+        df['long_short_diff'] = 0
+    
+    return df
+
+
+def add_taker_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Taker Volume features"""
+    if 'buy_sell_ratio' in df.columns and df['buy_sell_ratio'].notna().any():
+        df['taker_ratio_norm'] = df['buy_sell_ratio'] - 1  # Центрируем
+        df['taker_ratio_sma'] = df['taker_ratio_norm'].rolling(8).mean()
+        
+        if 'buy_vol' in df.columns:
+            df['taker_imbalance'] = (df['buy_vol'] - df['sell_vol']) / (df['buy_vol'] + df['sell_vol'] + 1e-10)
+            df['taker_vol_change'] = (df['buy_vol'] + df['sell_vol']).pct_change()
+    else:
+        df['taker_ratio_norm'] = 0
+        df['taker_ratio_sma'] = 0
+        df['taker_imbalance'] = 0
+        df['taker_vol_change'] = 0
+    
+    return df
+
+
+def add_premium_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Premium Index / Basis features"""
+    if 'premium_close' in df.columns and df['premium_close'].notna().any():
+        df['premium_norm'] = df['premium_close'] * 100
+        df['premium_sma'] = df['premium_norm'].rolling(8).mean()
+        df['premium_zscore'] = (
+            (df['premium_close'] - df['premium_close'].rolling(24).mean()) / 
+            (df['premium_close'].rolling(24).std() + 1e-10)
+        )
+    else:
+        df['premium_norm'] = 0
+        df['premium_sma'] = 0
+        df['premium_zscore'] = 0
+    
+    if 'basis' in df.columns and df['basis'].notna().any():
+        df['basis_sma'] = df['basis'].rolling(8).mean()
+        df['basis_zscore'] = (
+            (df['basis'] - df['basis'].rolling(24).mean()) / 
+            (df['basis'].rolling(24).std() + 1e-10)
+        )
+    else:
+        df['basis_sma'] = 0
+        df['basis_zscore'] = 0
     
     return df
 
@@ -337,6 +449,9 @@ def build_intraday_features(
     df = add_vwap_features(df)
     df = add_funding_features(df, funding_rate)
     df = add_oi_features(df, oi_data)
+    df = add_ls_ratio_features(df)      # НОВОЕ
+    df = add_taker_features(df)          # НОВОЕ
+    df = add_premium_features(df)        # НОВОЕ
     df = add_btc_correlation(df, btc_returns)
     df = add_volatility_intraday(df)
     df = add_momentum_intraday(df)
@@ -349,11 +464,19 @@ def build_intraday_features(
     exclude_cols = [
         'open', 'high', 'low', 'close', 'volume',
         'quote_volume', 'trades', 'taker_buy_base', 'taker_buy_quote',
+        'taker_buy_volume', 'taker_buy_quote_volume',
         'buy_ratio', 'target', 'future_return',
         'sma_10', 'sma_20', 'sma_50', 'typical_price',
         'vwap_cum_vol', 'vwap_cum_tp_vol', 'vwap', 'vwap_10', 'vwap_20',
         'vwap_upper', 'vwap_lower', 'bb_upper', 'bb_lower',
         'funding_rate', 'open_interest', 'btc_return',
+        # Derivatives raw columns
+        'sum_open_interest', 'sum_open_interest_value',
+        'long_short_ratio', 'long_account', 'short_account',
+        'buy_sell_ratio', 'buy_vol', 'sell_vol',
+        'mark_open', 'mark_high', 'mark_low', 'mark_close',
+        'premium_open', 'premium_high', 'premium_low', 'premium_close',
+        'basis',
         'open_time', 'close_time', 'timestamp', 'datetime', 'date', 'time',
         'symbol', 'buy_volume', 'sell_volume', 'trades_count'
     ]

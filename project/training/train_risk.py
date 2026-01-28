@@ -197,6 +197,102 @@ def build_risk_features(df: pd.DataFrame, market_predictions: Dict = None) -> Tu
         lambda x: x.autocorr() if len(x) > 1 else 0
     )
     
+    # === Derivatives Risk Features ===
+    # Funding Rate Risk
+    if 'funding_rate' in df.columns:
+        fr = df['funding_rate'].fillna(0)
+        
+        # Extreme funding = higher liquidation risk
+        fr_std = fr.rolling(100).std()
+        fr_mean = fr.rolling(100).mean()
+        df['funding_zscore'] = (fr - fr_mean) / (fr_std + 1e-10)
+        df['funding_extreme'] = (abs(df['funding_zscore']) > 2).astype(int)
+        
+        # Funding direction risk (going against funding)
+        df['funding_risk'] = abs(fr) * 100  # Scale to percentage
+        
+        # Cumulative funding pressure
+        df['funding_cumsum_risk'] = abs(fr.rolling(24).sum())  # ~1 day
+    else:
+        df['funding_zscore'] = 0
+        df['funding_extreme'] = 0
+        df['funding_risk'] = 0
+        df['funding_cumsum_risk'] = 0
+    
+    # Open Interest Risk
+    if 'sum_open_interest' in df.columns:
+        oi = df['sum_open_interest'].fillna(method='ffill')
+        
+        # OI spike = potential squeeze risk
+        oi_change = oi.pct_change()
+        df['oi_change_risk'] = abs(oi_change).clip(0, 0.5)
+        
+        # High OI = more liquidation cascade risk
+        oi_std = oi.rolling(100).std()
+        oi_mean = oi.rolling(100).mean()
+        df['oi_zscore'] = (oi - oi_mean) / (oi_std + 1e-10)
+        df['oi_extreme_high'] = (df['oi_zscore'] > 2).astype(int)
+        
+        # OI dropping fast = liquidations happening
+        df['oi_dropping_fast'] = (oi_change < -0.05).astype(int)
+    else:
+        df['oi_change_risk'] = 0
+        df['oi_zscore'] = 0
+        df['oi_extreme_high'] = 0
+        df['oi_dropping_fast'] = 0
+    
+    # Long/Short Ratio Risk
+    if 'long_short_ratio' in df.columns:
+        ls = df['long_short_ratio'].fillna(1)
+        
+        # Crowded trade risk
+        ls_std = ls.rolling(100).std()
+        ls_mean = ls.rolling(100).mean()
+        df['ls_zscore'] = (ls - ls_mean) / (ls_std + 1e-10)
+        
+        # Extreme positioning = squeeze risk
+        df['crowd_long_risk'] = (ls > 2.5).astype(int)  # >70% long
+        df['crowd_short_risk'] = (ls < 0.67).astype(int)  # >60% short
+        df['crowded_trade'] = df['crowd_long_risk'] | df['crowd_short_risk']
+    else:
+        df['ls_zscore'] = 0
+        df['crowd_long_risk'] = 0
+        df['crowd_short_risk'] = 0
+        df['crowded_trade'] = 0
+    
+    # Taker Volume Risk
+    if 'buy_sell_ratio' in df.columns:
+        bsr = df['buy_sell_ratio'].fillna(1)
+        
+        # Aggressive selling/buying = momentum risk
+        df['taker_imbalance'] = abs(bsr - 1)
+        df['aggressive_selling'] = (bsr < 0.8).astype(int)
+        df['aggressive_buying'] = (bsr > 1.2).astype(int)
+    else:
+        df['taker_imbalance'] = 0
+        df['aggressive_selling'] = 0
+        df['aggressive_buying'] = 0
+    
+    # Premium/Basis Risk
+    if 'lastFundingRate' in df.columns:
+        premium = df['lastFundingRate'].fillna(0)
+        
+        # High premium = potential correction risk
+        df['basis_risk'] = abs(premium) * 1000  # Scale
+        df['high_premium'] = (abs(premium) > 0.001).astype(int)
+    else:
+        df['basis_risk'] = 0
+        df['high_premium'] = 0
+    
+    # Combined Derivatives Risk Score
+    df['derivatives_risk'] = (
+        0.2 * df['funding_extreme'] +
+        0.2 * df['oi_extreme_high'] +
+        0.2 * df['crowded_trade'] +
+        0.2 * df['taker_imbalance'].clip(0, 1) +
+        0.2 * df['high_premium']
+    ).clip(0, 1)
+    
     # Drop NaN
     df = df.dropna()
     
@@ -207,7 +303,13 @@ def build_risk_features(df: pd.DataFrame, market_predictions: Dict = None) -> Tu
         'buy_ratio', 'mae_long', 'mae_short', 'sl_hit_long', 'sl_hit_short',
         'max_adverse_excursion', 'stop_loss_hit', 'volatility_spike', 'risk_score',
         'open_time', 'close_time', 'timestamp', 'datetime', 'date', 'time',
-        'symbol', 'buy_volume', 'sell_volume', 'trades_count'
+        'symbol', 'buy_volume', 'sell_volume', 'trades_count',
+        # Raw derivatives columns
+        'funding_rate', 'funding_time', 'mark_price',
+        'sum_open_interest', 'sum_open_interest_value',
+        'long_short_ratio', 'long_account', 'short_account',
+        'buy_sell_ratio', 'buy_vol', 'sell_vol',
+        'lastFundingRate', 'interestRate', 'indexPrice', 'estimatedSettlePrice'
     ]
     
     feature_names = [col for col in df.columns if col not in exclude_cols

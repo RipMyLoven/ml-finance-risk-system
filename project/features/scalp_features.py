@@ -121,6 +121,84 @@ def add_orderbook_imbalance(df: pd.DataFrame) -> pd.DataFrame:
         df['imbalance_momentum'] = df['buy_pressure'].diff(3)
         df['cum_imbalance_5'] = df['buy_pressure'].rolling(5).sum()
         df['cum_imbalance_10'] = df['buy_pressure'].rolling(10).sum()
+    elif 'buy_sell_ratio' in df.columns:
+        # Если есть taker volume данные
+        df['buy_pressure'] = (df['buy_sell_ratio'] - 1) / 2  # Нормализуем
+        df['buy_pressure'] = df['buy_pressure'].clip(-1, 1)
+        df['buy_pressure_sma'] = df['buy_pressure'].rolling(5).mean()
+        df['imbalance_momentum'] = df['buy_pressure'].diff(3)
+        df['cum_imbalance_5'] = df['buy_pressure'].rolling(5).sum()
+        df['cum_imbalance_10'] = df['buy_pressure'].rolling(10).sum()
+    
+    return df
+
+
+def add_derivatives_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Добавить фичи из derivatives данных (funding, OI, LS ratio)
+    """
+    # Funding Rate фичи
+    if 'funding_rate' in df.columns:
+        df['funding_rate_norm'] = df['funding_rate'] * 1000  # Нормализуем
+        df['funding_rate_sma'] = df['funding_rate'].rolling(8).mean() * 1000
+        df['funding_rate_change'] = df['funding_rate'].diff() * 1000
+        df['funding_rate_zscore'] = (
+            (df['funding_rate'] - df['funding_rate'].rolling(24).mean()) / 
+            (df['funding_rate'].rolling(24).std() + 1e-10)
+        )
+    
+    # Open Interest фичи
+    if 'sum_open_interest' in df.columns:
+        df['oi_change'] = df['sum_open_interest'].pct_change()
+        df['oi_change_sma'] = df['oi_change'].rolling(5).mean()
+        df['oi_zscore'] = (
+            (df['sum_open_interest'] - df['sum_open_interest'].rolling(24).mean()) / 
+            (df['sum_open_interest'].rolling(24).std() + 1e-10)
+        )
+        
+        # OI vs Price divergence
+        price_change = df['close'].pct_change()
+        oi_change = df['sum_open_interest'].pct_change()
+        df['oi_price_divergence'] = oi_change - price_change
+    
+    # Long/Short Ratio фичи
+    if 'long_short_ratio' in df.columns:
+        df['ls_ratio_norm'] = (df['long_short_ratio'] - 1)  # Нормализуем вокруг 1
+        df['ls_ratio_sma'] = df['ls_ratio_norm'].rolling(5).mean()
+        df['ls_ratio_change'] = df['long_short_ratio'].pct_change()
+        df['ls_ratio_zscore'] = (
+            (df['long_short_ratio'] - df['long_short_ratio'].rolling(24).mean()) / 
+            (df['long_short_ratio'].rolling(24).std() + 1e-10)
+        )
+    
+    if 'long_account' in df.columns:
+        df['long_pct'] = df['long_account']
+        df['short_pct'] = df['short_account']
+        df['long_short_diff'] = df['long_account'] - df['short_account']
+    
+    # Taker Volume фичи
+    if 'buy_vol' in df.columns and 'sell_vol' in df.columns:
+        df['taker_buy_sell_ratio'] = df['buy_vol'] / (df['sell_vol'] + 1e-10)
+        df['taker_buy_sell_diff'] = (df['buy_vol'] - df['sell_vol']) / (df['buy_vol'] + df['sell_vol'] + 1e-10)
+        df['taker_vol_total'] = df['buy_vol'] + df['sell_vol']
+        df['taker_vol_change'] = df['taker_vol_total'].pct_change()
+    
+    # Premium Index фичи (basis)
+    if 'premium_close' in df.columns:
+        df['premium_norm'] = df['premium_close'] * 100  # В процентах
+        df['premium_sma'] = df['premium_norm'].rolling(8).mean()
+        df['premium_zscore'] = (
+            (df['premium_close'] - df['premium_close'].rolling(24).mean()) / 
+            (df['premium_close'].rolling(24).std() + 1e-10)
+        )
+    
+    # Basis фичи (если есть)
+    if 'basis' in df.columns:
+        df['basis_sma'] = df['basis'].rolling(8).mean()
+        df['basis_zscore'] = (
+            (df['basis'] - df['basis'].rolling(24).mean()) / 
+            (df['basis'].rolling(24).std() + 1e-10)
+        )
     
     return df
 
@@ -232,6 +310,7 @@ def build_scalp_features(
     df = add_orderbook_imbalance(df)
     df = add_price_action(df)
     df = add_momentum_scalp(df)
+    df = add_derivatives_features(df)  # НОВЫЕ фичи из derivatives
     df = add_target_scalp(df, horizon, threshold)
     
     # Убираем NaN
@@ -241,9 +320,17 @@ def build_scalp_features(
     exclude_cols = [
         'open', 'high', 'low', 'close', 'volume',
         'quote_volume', 'trades', 'taker_buy_base', 'taker_buy_quote',
+        'taker_buy_volume', 'taker_buy_quote_volume',
         'buy_ratio', 'target', 'future_return',
         'open_time', 'close_time', 'timestamp', 'datetime', 'date', 'time',
-        'symbol', 'buy_volume', 'sell_volume', 'trades_count'
+        'symbol', 'buy_volume', 'sell_volume', 'trades_count',
+        # Derivatives raw columns
+        'funding_rate', 'sum_open_interest', 'sum_open_interest_value',
+        'long_short_ratio', 'long_account', 'short_account',
+        'buy_sell_ratio', 'buy_vol', 'sell_vol',
+        'mark_open', 'mark_high', 'mark_low', 'mark_close',
+        'premium_open', 'premium_high', 'premium_low', 'premium_close',
+        'basis'
     ]
     
     feature_names = [col for col in df.columns if col not in exclude_cols 

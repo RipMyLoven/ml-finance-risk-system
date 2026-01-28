@@ -38,7 +38,14 @@ from config import (
     PRICE_MOVE_THRESHOLD, PREDICTION_HORIZON,
     TRAIN_TEST_SPLIT, VALIDATION_SPLIT
 )
-from data.data_loader import prepare_training_data
+# Используем новый data_loader_v2 для полных данных
+try:
+    from data.data_loader_v2 import prepare_training_data_v2 as prepare_training_data, BinanceDataLoader
+    DATA_LOADER_V2 = True
+except ImportError:
+    from data.data_loader import prepare_training_data
+    DATA_LOADER_V2 = False
+    
 from features.scalp_features import build_scalp_features
 from features.intraday_features import build_intraday_features
 from features.swing_features import build_swing_features
@@ -125,11 +132,21 @@ class OptunaTrainer:
             data_path = os.path.join(os.path.dirname(project_dir), 'data')
         
         print(f"Data path: {data_path}")
+        print(f"Using data_loader_v2: {DATA_LOADER_V2}")
         
-        raw_data = prepare_training_data(
-            data_dir=data_path,
-            timeframes=['5m', '15m', '1h', '4h', '1d', '3d']
-        )
+        if DATA_LOADER_V2:
+            # Новый загрузчик с полными данными (funding, OI, LS ratio и т.д.)
+            raw_data = prepare_training_data(
+                data_dir=data_path,
+                timeframes=['5m', '15m', '1h', '4h', '1d'],
+                include_derivatives=True  # Включаем funding, OI, LS ratio
+            )
+        else:
+            # Старый загрузчик (только OHLCV из trades)
+            raw_data = prepare_training_data(
+                data_dir=data_path,
+                timeframes=['5m', '15m', '1h', '4h', '1d', '3d']
+            )
         
         if not raw_data:
             raise ValueError("No data loaded!")
