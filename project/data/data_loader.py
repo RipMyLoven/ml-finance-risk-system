@@ -82,8 +82,12 @@ def aggregate_to_ohlcv(
     # Trade count
     ohlcv['trades_count'] = trades['price'].resample(rule).count()
     
-    # Drop NaN rows
-    ohlcv = ohlcv.dropna()
+    # Forward fill для пропусков в данных вместо удаления
+    # Это сохранит непрерывность временного ряда
+    ohlcv = ohlcv.ffill().bfill()
+    
+    # Удаляем только строки где ВСЕ OHLCV = NaN (полностью пустые периоды)
+    ohlcv = ohlcv.dropna(subset=['open', 'close'], how='all')
     
     # Reset index
     ohlcv = ohlcv.reset_index()

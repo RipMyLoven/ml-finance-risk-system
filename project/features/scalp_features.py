@@ -300,7 +300,8 @@ def build_scalp_features(
         df: DataFrame с фичами
         feature_names: список названий фичей
     """
-    print("Building Scalp features...")
+    initial_len = len(df)
+    print(f"Building Scalp features... (initial rows: {initial_len})")
     
     # Добавляем все фичи
     df = add_log_returns(df)
@@ -312,9 +313,6 @@ def build_scalp_features(
     df = add_momentum_scalp(df)
     df = add_derivatives_features(df)  # НОВЫЕ фичи из derivatives
     df = add_target_scalp(df, horizon, threshold)
-    
-    # Убираем NaN
-    df = df.dropna()
     
     # Определяем фичи (исключаем служебные колонки)
     exclude_cols = [
@@ -336,14 +334,44 @@ def build_scalp_features(
     feature_names = [col for col in df.columns if col not in exclude_cols 
                      and df[col].dtype in ['float64', 'float32', 'int64', 'int32']]
     
+    # ВАЖНО: Заменяем inf и NaN ПЕРЕД нормализацией, чтобы не терять данные
+    # Стратегия: forward-fill -> backward-fill -> 0 для оставшихся NaN
+    for col in feature_names:
+        # Сначала заменяем inf на NaN
+        df[col] = df[col].replace([np.inf, -np.inf], np.nan)
+        # Forward fill - заполняем предыдущим значением
+        df[col] = df[col].ffill()
+        # Backward fill - для начала ряда
+        df[col] = df[col].bfill()
+        # Оставшиеся NaN заменяем на 0
+        df[col] = df[col].fillna(0)
+    
+    # Убираем только строки где target=NaN (конец ряда из-за shift)
+    # Это минимально необходимое удаление
+    if 'target' in df.columns:
+        df = df[df['target'].notna()]
+    
+    # Проверка на оставшиеся inf/nan в фичах (safety check)
+    for col in feature_names:
+        if df[col].isna().any() or np.isinf(df[col]).any():
+            df[col] = df[col].replace([np.inf, -np.inf], 0).fillna(0)
+    
     # Нормализация
     if normalize and len(df) > 0:
         scaler = StandardScaler()
+        # Клипаем экстремальные значения перед нормализацией
+        for col in feature_names:
+            q01 = df[col].quantile(0.001)
+            q99 = df[col].quantile(0.999)
+            df[col] = df[col].clip(q01, q99)
+        
         df[feature_names] = scaler.fit_transform(df[feature_names])
-        # Заменяем inf и nan
+        # Финальная проверка после нормализации
         df[feature_names] = df[feature_names].replace([np.inf, -np.inf], 0).fillna(0)
     
-    print(f"Scalp features: {len(feature_names)}, samples: {len(df)}")
+    final_len = len(df)
+    retained_pct = (final_len / initial_len * 100) if initial_len > 0 else 0
+    print(f"Scalp features: {len(feature_names)}, samples: {final_len} ({retained_pct:.1f}% retained)")
     
     return df, feature_names
 

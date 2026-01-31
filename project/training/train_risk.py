@@ -293,9 +293,6 @@ def build_risk_features(df: pd.DataFrame, market_predictions: Dict = None) -> Tu
         0.2 * df['high_premium']
     ).clip(0, 1)
     
-    # Drop NaN
-    df = df.dropna()
-    
     # Feature list
     exclude_cols = [
         'open', 'high', 'low', 'close', 'volume',
@@ -315,7 +312,14 @@ def build_risk_features(df: pd.DataFrame, market_predictions: Dict = None) -> Tu
     feature_names = [col for col in df.columns if col not in exclude_cols
                      and df[col].dtype in ['float64', 'float32', 'int64', 'int32']]
     
+    # ВАЖНО: Заменяем inf и NaN ПЕРЕД дальнейшей обработкой
+    for col in feature_names:
+        df[col] = df[col].replace([np.inf, -np.inf], np.nan)
+        df[col] = df[col].ffill().bfill().fillna(0)
+    
     print(f"Risk features: {len(feature_names)}")
+    
+    return df, feature_names
     
     return df, feature_names
 

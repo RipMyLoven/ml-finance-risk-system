@@ -1,5 +1,5 @@
 # Core ML
-python>=3.10
+# Requires Python >= 3.10
 numpy>=1.24.0
 pandas>=2.0.0
 scipy>=1.10.0
@@ -21,7 +21,7 @@ requests>=2.31.0
 websockets>=11.0.0
 
 # Trading / Backtesting
-optinus>=0.1.0
+# optinus>=0.1.0  # Not available on PyPI
 
 # Visualization / Analysis
 matplotlib>=3.7.0

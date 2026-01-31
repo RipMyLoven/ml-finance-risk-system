@@ -168,6 +168,7 @@ class OptunaTrainer:
         all_features = []
         all_targets = []
         feature_names = None
+        expected_features = None
         
         for symbol, tf_data in raw_data.items():
             if '5m' not in tf_data:
@@ -182,19 +183,26 @@ class OptunaTrainer:
                 )
                 
                 if len(df) > 100 and 'target' in df.columns:
-                    feature_names = f_names
+                    if feature_names is None:
+                        feature_names = f_names
+                        expected_features = len(f_names)
+                    
+                    if len(f_names) != expected_features:
+                        print(f"  Skipping {symbol}: {len(f_names)} features (expected {expected_features})")
+                        continue
+                    
                     X = df[feature_names].values
                     y = df['target'].values
                     valid_mask = ~np.isnan(y)
-                    all_features.append(X[valid_mask])
-                    all_targets.append(y[valid_mask])
+                    all_features.append(X[valid_mask].astype(np.float32))
+                    all_targets.append(y[valid_mask].astype(np.int32))
                     
             except Exception as e:
                 print(f"  Error processing {symbol}: {e}")
         
         if all_features:
-            X = np.vstack(all_features).astype(np.float32)
-            y = np.concatenate(all_targets).astype(np.int32)
+            X = np.vstack(all_features)
+            y = np.concatenate(all_targets)
             X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
             
             self.data['scalp'] = {
@@ -202,7 +210,7 @@ class OptunaTrainer:
                 'y': y,
                 'feature_names': feature_names
             }
-            print(f"  SCALP: {X.shape[0]} samples, {X.shape[1]} features")
+            print(f"  SCALP: {X.shape[0]:,} samples, {X.shape[1]} features")
         else:
             print("  No scalp data available")
     
@@ -213,6 +221,7 @@ class OptunaTrainer:
         all_features = []
         all_targets = []
         feature_names = None
+        expected_features = None
         
         for symbol, tf_data in raw_data.items():
             if '1h' not in tf_data:
@@ -227,19 +236,26 @@ class OptunaTrainer:
                 )
                 
                 if len(df) > 50 and 'target' in df.columns:
-                    feature_names = f_names
+                    if feature_names is None:
+                        feature_names = f_names
+                        expected_features = len(f_names)
+                    
+                    if len(f_names) != expected_features:
+                        print(f"  Skipping {symbol}: {len(f_names)} features (expected {expected_features})")
+                        continue
+                    
                     X = df[feature_names].values
                     y = df['target'].values
                     valid_mask = ~np.isnan(y)
-                    all_features.append(X[valid_mask])
-                    all_targets.append(y[valid_mask])
+                    all_features.append(X[valid_mask].astype(np.float32))
+                    all_targets.append(y[valid_mask].astype(np.int32))
                     
             except Exception as e:
                 print(f"  Error processing {symbol}: {e}")
         
         if all_features:
-            X = np.vstack(all_features).astype(np.float32)
-            y = np.concatenate(all_targets).astype(np.int32)
+            X = np.vstack(all_features)
+            y = np.concatenate(all_targets)
             X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
             
             self.data['intraday'] = {
@@ -247,7 +263,7 @@ class OptunaTrainer:
                 'y': y,
                 'feature_names': feature_names
             }
-            print(f"  INTRADAY: {X.shape[0]} samples, {X.shape[1]} features")
+            print(f"  INTRADAY: {X.shape[0]:,} samples, {X.shape[1]} features")
         else:
             print("  No intraday data available")
     
@@ -258,6 +274,7 @@ class OptunaTrainer:
         all_features = []
         all_targets = []
         feature_names = None
+        expected_features = None
         
         for symbol, tf_data in raw_data.items():
             if '1d' not in tf_data:
@@ -267,7 +284,6 @@ class OptunaTrainer:
                 df = tf_data['1d'].copy()
                 
                 # Adaptive horizon based on data size
-                # Need at least 30 samples after dropna
                 adaptive_horizon = min(PREDICTION_HORIZON['swing'], max(1, len(df) // 10))
                 
                 df, f_names = build_swing_features(
@@ -277,19 +293,26 @@ class OptunaTrainer:
                 )
                 
                 if len(df) > 30 and 'target' in df.columns:
-                    feature_names = f_names
+                    if feature_names is None:
+                        feature_names = f_names
+                        expected_features = len(f_names)
+                    
+                    if len(f_names) != expected_features:
+                        print(f"  Skipping {symbol}: {len(f_names)} features (expected {expected_features})")
+                        continue
+                    
                     X = df[feature_names].values
                     y = df['target'].values
                     valid_mask = ~np.isnan(y)
-                    all_features.append(X[valid_mask])
-                    all_targets.append(y[valid_mask])
+                    all_features.append(X[valid_mask].astype(np.float32))
+                    all_targets.append(y[valid_mask].astype(np.int32))
                     
             except Exception as e:
                 print(f"  Error processing {symbol}: {e}")
         
         if all_features:
-            X = np.vstack(all_features).astype(np.float32)
-            y = np.concatenate(all_targets).astype(np.int32)
+            X = np.vstack(all_features)
+            y = np.concatenate(all_targets)
             X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
             
             self.data['swing'] = {
@@ -297,7 +320,7 @@ class OptunaTrainer:
                 'y': y,
                 'feature_names': feature_names
             }
-            print(f"  SWING: {X.shape[0]} samples, {X.shape[1]} features")
+            print(f"  SWING: {X.shape[0]:,} samples, {X.shape[1]} features")
         else:
             print("  No swing data available")
     
@@ -308,6 +331,7 @@ class OptunaTrainer:
         all_features = []
         all_targets = []
         feature_names = None
+        expected_features = None
         
         for symbol, tf_data in raw_data.items():
             if '5m' not in tf_data:
@@ -318,21 +342,27 @@ class OptunaTrainer:
                 df, f_names = build_risk_features(df)
                 
                 if len(df) > 100:
-                    feature_names = f_names
+                    if feature_names is None:
+                        feature_names = f_names
+                        expected_features = len(f_names)
+                    
+                    if len(f_names) != expected_features:
+                        print(f"  Skipping {symbol}: {len(f_names)} features (expected {expected_features})")
+                        continue
+                    
                     X = df[feature_names].values
-                    # Risk target: future volatility
                     df['future_vol'] = df['close'].pct_change().rolling(20).std().shift(-20)
                     y = df['future_vol'].values
                     valid_mask = ~np.isnan(y) & ~np.isnan(X).any(axis=1)
-                    all_features.append(X[valid_mask])
-                    all_targets.append(y[valid_mask])
+                    all_features.append(X[valid_mask].astype(np.float32))
+                    all_targets.append(y[valid_mask].astype(np.float32))
                     
             except Exception as e:
                 print(f"  Error processing {symbol}: {e}")
         
         if all_features:
-            X = np.vstack(all_features).astype(np.float32)
-            y = np.concatenate(all_targets).astype(np.float32)
+            X = np.vstack(all_features)
+            y = np.concatenate(all_targets)
             X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
             y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
             
@@ -341,7 +371,7 @@ class OptunaTrainer:
                 'y': y,
                 'feature_names': feature_names
             }
-            print(f"  RISK: {X.shape[0]} samples, {X.shape[1]} features")
+            print(f"  RISK: {X.shape[0]:,} samples, {X.shape[1]} features")
         else:
             print("  No risk data available")
     
