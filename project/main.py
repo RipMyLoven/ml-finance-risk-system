@@ -23,10 +23,22 @@ import os
 import sys
 import argparse
 import pickle
+import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from functools import partial
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+
+# Количество доступных ядер CPU
+N_CORES = mp.cpu_count()
+
+try:
+    from joblib import Parallel, delayed
+    JOBLIB_AVAILABLE = True
+except ImportError:
+    JOBLIB_AVAILABLE = False
 
 # Add project to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -59,24 +71,30 @@ class TradingSystem:
     - Model prediction
     - Meta decision
     - Signal generation
+    
+    Использует все доступные ядра CPU для параллельной обработки.
     """
     
     def __init__(
         self,
         api_key: str = None,
         api_secret: str = None,
-        symbols: List[str] = None
+        symbols: List[str] = None,
+        n_workers: int = -1
     ):
         """
         Args:
             api_key: Binance API key
             api_secret: Binance API secret
             symbols: список торговых пар
+            n_workers: количество worker'ов (-1 = все ядра CPU)
         """
         self.symbols = symbols or TOP_SYMBOLS
+        self.n_workers = N_CORES if n_workers == -1 else min(n_workers, N_CORES)
         
         # Initialize components
         print("Initializing Trading System...")
+        print(f"Using {self.n_workers} CPU cores for parallel processing")
         
         # Data collector
         self.data_collector = BinanceDataCollector(api_key, api_secret)
@@ -145,35 +163,16 @@ class TradingSystem:
         Returns:
             Dict[symbol][timeframe] = DataFrame
         """
-        print(f"\nCollecting data for {len(self.symbols)} symbols...")
+        print(f"\nCollecting data for {len(self.symbols)} symbols using {self.n_workers} workers...")
         return self.data_collector.collect_all_symbols_data(self.symbols, days)
     
-    def prepare_features(
-        self,
-        data: Dict[str, Dict[str, pd.DataFrame]]
-    ) -> Dict[str, Dict]:
+    def _process_symbol_features(self, symbol: str, tf_data: Dict[str, pd.DataFrame]) -> tuple:
         """
-        Подготовить фичи для всех символов и таймфреймов
-        
-        Returns:
-            Dict[symbol] = {
-                'scalp_features': array,
-                'intraday_features': array,
-                'swing_features': array,
-                'scalp_df': DataFrame,
-                'intraday_df': DataFrame,
-                'swing_df': DataFrame,
-            }
+        Обработка фичей для одного символа (для параллельного выполнения)
         """
-        print("\nPreparing features...")
+        symbol_features = {}
         
-        all_features = {}
-        
-        for symbol, tf_data in data.items():
-            print(f"  Processing {symbol}...")
-            
-            symbol_features = {}
-            
+        try:
             # Scalp features (5m)
             if '5m' in tf_data:
                 df, feature_names = build_scalp_features(
@@ -213,33 +212,62 @@ class TradingSystem:
                 returns = tf_data['5m']['close'].pct_change()
                 symbol_features['volatility'] = returns.rolling(20).std().iloc[-1]
                 symbol_features['avg_volatility'] = returns.rolling(100).std().iloc[-1]
-            
-            all_features[symbol] = symbol_features
         
-        return all_features
+        except Exception as e:
+            print(f"  Error processing {symbol}: {e}")
+        
+        return (symbol, symbol_features)
     
-    def predict_all(
+    def prepare_features(
         self,
-        features: Dict[str, Dict]
+        data: Dict[str, Dict[str, pd.DataFrame]]
     ) -> Dict[str, Dict]:
         """
-        Получить предсказания всех моделей
+        Подготовить фичи для всех символов и таймфреймов
+        ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА с использованием всех ядер CPU
         
         Returns:
             Dict[symbol] = {
-                'scalp': {'P_up': float, 'P_down': float, 'expected_return': float},
-                'intraday': {...},
-                'swing': {...},
-                'risk_score': float
+                'scalp_features': array,
+                'intraday_features': array,
+                'swing_features': array,
+                'scalp_df': DataFrame,
+                'intraday_df': DataFrame,
+                'swing_df': DataFrame,
             }
         """
-        print("\nGetting predictions...")
+        print(f"\nPreparing features using {self.n_workers} CPU cores...")
         
-        predictions = {}
+        all_features = {}
         
-        for symbol, symbol_features in features.items():
-            preds = {}
+        if JOBLIB_AVAILABLE and self.n_workers > 1 and len(data) > 1:
+            # Параллельная обработка с joblib
+            results = Parallel(n_jobs=self.n_workers, verbose=1, backend='loky')(
+                delayed(self._process_symbol_features)(symbol, tf_data)
+                for symbol, tf_data in data.items()
+            )
             
+            for symbol, symbol_features in results:
+                if symbol_features:
+                    all_features[symbol] = symbol_features
+        else:
+            # Последовательная обработка
+            for symbol, tf_data in data.items():
+                print(f"  Processing {symbol}...")
+                _, symbol_features = self._process_symbol_features(symbol, tf_data)
+                if symbol_features:
+                    all_features[symbol] = symbol_features
+        
+        print(f"  Processed {len(all_features)} symbols")
+        return all_features
+    
+    def _predict_symbol(self, symbol: str, symbol_features: Dict) -> tuple:
+        """
+        Предсказание для одного символа (для параллельного выполнения)
+        """
+        preds = {}
+        
+        try:
             # Scalp prediction
             if self.scalp_model and 'scalp_features' in symbol_features:
                 X = symbol_features['scalp_features']
@@ -284,13 +312,10 @@ class TradingSystem:
             
             # Risk prediction
             if self.risk_model and 'scalp_df' in symbol_features:
-                # Use the same features that were used for training
-                # Get feature names from the saved model
                 risk_feature_names = self._risk_features if hasattr(self, '_risk_features') else None
                 
                 if risk_feature_names:
                     df = symbol_features['scalp_df'].copy()
-                    # Only use features that exist in the data and were in training
                     available_features = [f for f in risk_feature_names if f in df.columns]
                     
                     if len(available_features) == len(risk_feature_names):
@@ -303,15 +328,62 @@ class TradingSystem:
                         )
                         preds['risk_score'] = float(risk_pred['risk_score'][0])
                     else:
-                        # Features mismatch - use default
                         preds['risk_score'] = 0.5
                 else:
                     preds['risk_score'] = 0.5
             else:
                 preds['risk_score'] = 0.5
-            
-            predictions[symbol] = preds
+                
+        except Exception as e:
+            print(f"  Prediction error for {symbol}: {e}")
+            preds = {
+                'scalp': {'P_up': 0.33, 'P_down': 0.33, 'P_flat': 0.34, 'expected_return': 0},
+                'intraday': {'P_up': 0.33, 'P_down': 0.33, 'P_flat': 0.34, 'expected_return': 0},
+                'swing': {'P_up': 0.33, 'P_down': 0.33, 'P_flat': 0.34, 'expected_return': 0},
+                'risk_score': 0.5
+            }
         
+        return (symbol, preds)
+    
+    def predict_all(
+        self,
+        features: Dict[str, Dict]
+    ) -> Dict[str, Dict]:
+        """
+        Получить предсказания всех моделей
+        ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА с использованием ThreadPoolExecutor
+        
+        Returns:
+            Dict[symbol] = {
+                'scalp': {'P_up': float, 'P_down': float, 'expected_return': float},
+                'intraday': {...},
+                'swing': {...},
+                'risk_score': float
+            }
+        """
+        print(f"\nGetting predictions using {self.n_workers} workers...")
+        
+        predictions = {}
+        
+        # Используем ThreadPoolExecutor для параллельных предсказаний
+        # (ThreadPool лучше для I/O-bound и light CPU tasks, модели LightGBM thread-safe)
+        if self.n_workers > 1 and len(features) > 1:
+            with ThreadPoolExecutor(max_workers=self.n_workers) as executor:
+                futures = {
+                    executor.submit(self._predict_symbol, symbol, symbol_features): symbol
+                    for symbol, symbol_features in features.items()
+                }
+                
+                for future in as_completed(futures):
+                    symbol, preds = future.result()
+                    predictions[symbol] = preds
+        else:
+            # Последовательное выполнение
+            for symbol, symbol_features in features.items():
+                _, preds = self._predict_symbol(symbol, symbol_features)
+                predictions[symbol] = preds
+        
+        print(f"  Predictions complete for {len(predictions)} symbols")
         return predictions
     
     def generate_signals(
@@ -653,11 +725,23 @@ def main():
                         help='Use CSV data instead of API')
     parser.add_argument('--data-path', type=str, default=None,
                         help='Path to CSV data folder')
+    parser.add_argument('--workers', type=int, default=-1,
+                        help='Number of CPU workers (-1 = all cores)')
     
     args = parser.parse_args()
     
+    # Количество worker'ов
+    n_workers = N_CORES if args.workers == -1 else min(args.workers, N_CORES)
+    
+    print("\n" + "="*60)
+    print("AI CRYPTO TRADING SYSTEM")
+    print("="*60)
+    print(f"CPU Cores Available: {N_CORES}")
+    print(f"Using Workers: {n_workers}")
+    print("="*60)
+    
     # Initialize system
-    system = TradingSystem(symbols=args.symbols)
+    system = TradingSystem(symbols=args.symbols, n_workers=n_workers)
     
     if args.mode == 'run':
         # Run trading system

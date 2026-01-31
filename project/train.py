@@ -17,15 +17,29 @@ import json
 import pickle
 import argparse
 import warnings
+import multiprocessing as mp
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from functools import partial
 
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import accuracy_score, log_loss, root_mean_squared_error
+
+try:
+    from joblib import Parallel, delayed
+    JOBLIB_AVAILABLE = True
+except ImportError:
+    JOBLIB_AVAILABLE = False
+    print("Warning: joblib not installed. Run: pip install joblib")
+
+# Количество ядер CPU
+N_CORES = mp.cpu_count()
+print(f"Available CPU cores: {N_CORES}")
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -77,6 +91,116 @@ STUDY_DIR = "optuna_studies"
 BEST_PARAMS_FILE = "best_params.json"
 
 
+# ============== STATIC FUNCTIONS FOR MULTIPROCESSING ==============
+# Эти функции должны быть на уровне модуля для работы с Pool.map()
+
+def process_symbol_scalp_static(args):
+    """Статическая функция для параллельной обработки scalp данных"""
+    symbol, tf_data = args
+    if '5m' not in tf_data:
+        return None
+    
+    try:
+        df = tf_data['5m'].copy()
+        df, f_names = build_scalp_features(
+            df,
+            horizon=PREDICTION_HORIZON['scalp'],
+            threshold=PRICE_MOVE_THRESHOLD['scalp'] / 100
+        )
+        
+        if len(df) > 100 and 'target' in df.columns:
+            X = df[f_names].values
+            y = df['target'].values
+            valid_mask = ~np.isnan(y)
+            if valid_mask.sum() > 0:
+                return (X[valid_mask].astype(np.float32), 
+                        y[valid_mask].astype(np.int32), 
+                        f_names)
+    except Exception as e:
+        pass
+    return None
+
+
+def process_symbol_intraday_static(args):
+    """Статическая функция для параллельной обработки intraday данных"""
+    symbol, tf_data = args
+    if '1h' not in tf_data:
+        return None
+    
+    try:
+        df = tf_data['1h'].copy()
+        df, f_names = build_intraday_features(
+            df,
+            horizon=PREDICTION_HORIZON['intraday'],
+            threshold=PRICE_MOVE_THRESHOLD['intraday'] / 100
+        )
+        
+        if len(df) > 50 and 'target' in df.columns:
+            X = df[f_names].values
+            y = df['target'].values
+            valid_mask = ~np.isnan(y)
+            if valid_mask.sum() > 0:
+                return (X[valid_mask].astype(np.float32), 
+                        y[valid_mask].astype(np.int32), 
+                        f_names)
+    except Exception as e:
+        pass
+    return None
+
+
+def process_symbol_swing_static(args):
+    """Статическая функция для параллельной обработки swing данных"""
+    symbol, tf_data = args
+    if '1d' not in tf_data:
+        return None
+    
+    try:
+        df = tf_data['1d'].copy()
+        adaptive_horizon = min(PREDICTION_HORIZON['swing'], max(1, len(df) // 10))
+        
+        df, f_names = build_swing_features(
+            df,
+            horizon=adaptive_horizon,
+            threshold=PRICE_MOVE_THRESHOLD['swing'] / 100
+        )
+        
+        if len(df) > 30 and 'target' in df.columns:
+            X = df[f_names].values
+            y = df['target'].values
+            valid_mask = ~np.isnan(y)
+            if valid_mask.sum() > 0:
+                return (X[valid_mask].astype(np.float32), 
+                        y[valid_mask].astype(np.int32), 
+                        f_names)
+    except Exception as e:
+        pass
+    return None
+
+
+def process_symbol_risk_static(args):
+    """Статическая функция для параллельной обработки risk данных"""
+    symbol, tf_data = args
+    if '5m' not in tf_data:
+        return None
+    
+    try:
+        df = tf_data['5m'].copy()
+        df, f_names = build_risk_features(df)
+        
+        if len(df) > 100:
+            X = df[f_names].values
+            df['future_vol'] = df['close'].pct_change().rolling(20).std().shift(-20)
+            y = df['future_vol'].values
+            valid_mask = ~np.isnan(y) & ~np.isnan(X).any(axis=1)
+            if valid_mask.sum() > 0:
+                return (X[valid_mask].astype(np.float32), 
+                        y[valid_mask].astype(np.float32), 
+                        f_names)
+    except Exception as e:
+        pass
+    return None
+
+
 class OptunaTrainer:
     """
     Advanced trainer with Optuna hyperparameter optimization
@@ -90,7 +214,8 @@ class OptunaTrainer:
         n_jobs: int = 1,
         timeout: Optional[int] = None,
         study_name: Optional[str] = None,
-        continue_study: bool = False
+        continue_study: bool = False,
+        n_workers: int = -1
     ):
         """
         Args:
@@ -101,6 +226,7 @@ class OptunaTrainer:
             timeout: таймаут в секундах
             study_name: имя study для сохранения
             continue_study: продолжить предыдущую study
+            n_workers: количество worker'ов для параллельной обработки данных (-1 = все ядра)
         """
         self.model_type = model_type
         self.use_gpu = use_gpu
@@ -109,6 +235,10 @@ class OptunaTrainer:
         self.timeout = timeout
         self.study_name = study_name or f"study_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.continue_study = continue_study
+        
+        # Parallel processing settings
+        self.n_workers = N_CORES if n_workers == -1 else min(n_workers, N_CORES)
+        print(f"Using {self.n_workers} CPU workers for parallel processing")
         
         # Device settings
         self.device = "gpu" if use_gpu else "cpu"
@@ -122,9 +252,9 @@ class OptunaTrainer:
         os.makedirs("models", exist_ok=True)
     
     def load_data(self, data_path: Optional[str] = None) -> Dict:
-        """Load and prepare all training data"""
+        """Load and prepare all training data with FULL parallelization"""
         print("\n" + "="*60)
-        print("LOADING DATA")
+        print("LOADING DATA - MAXIMUM PARALLELIZATION")
         print("="*60)
         
         if data_path is None:
@@ -133,6 +263,7 @@ class OptunaTrainer:
         
         print(f"Data path: {data_path}")
         print(f"Using data_loader_v2: {DATA_LOADER_V2}")
+        print(f"CPU cores: {self.n_workers}")
         
         if DATA_LOADER_V2:
             # Новый загрузчик с полными данными (funding, OI, LS ratio и т.д.)
@@ -153,227 +284,87 @@ class OptunaTrainer:
         
         print(f"Loaded data for {len(raw_data)} symbols")
         
-        # Process data for each model type
-        self._prepare_scalp_data(raw_data)
-        self._prepare_intraday_data(raw_data)
-        self._prepare_swing_data(raw_data)
-        self._prepare_risk_data(raw_data)
+        # ============== ПОЛНАЯ ПАРАЛЛЕЛИЗАЦИЯ ==============
+        print(f"\n{'='*60}")
+        print(f"PARALLEL PROCESSING ON {self.n_workers} CPU CORES")
+        print(f"{'='*60}")
+        
+        # Конвертируем в список для параллельной обработки
+        symbols_data = list(raw_data.items())
+        n_symbols = len(symbols_data)
+        print(f"Processing {n_symbols} symbols in parallel...")
+        
+        # Используем multiprocessing.Pool для равномерной загрузки всех ядер
+        import multiprocessing as mp
+        from multiprocessing import Pool
+        
+        # Устанавливаем метод запуска процессов
+        try:
+            mp.set_start_method('fork', force=True)
+        except RuntimeError:
+            pass  # Уже установлен
+        
+        # ============== SCALP DATA ==============
+        print(f"\n[1/4] Processing SCALP data on {self.n_workers} cores...")
+        with Pool(processes=self.n_workers) as pool:
+            scalp_results = pool.map(process_symbol_scalp_static, symbols_data)
+        self._aggregate_results('scalp', scalp_results)
+        
+        # ============== INTRADAY DATA ==============
+        print(f"\n[2/4] Processing INTRADAY data on {self.n_workers} cores...")
+        with Pool(processes=self.n_workers) as pool:
+            intraday_results = pool.map(process_symbol_intraday_static, symbols_data)
+        self._aggregate_results('intraday', intraday_results)
+        
+        # ============== SWING DATA ==============
+        print(f"\n[3/4] Processing SWING data on {self.n_workers} cores...")
+        with Pool(processes=self.n_workers) as pool:
+            swing_results = pool.map(process_symbol_swing_static, symbols_data)
+        self._aggregate_results('swing', swing_results)
+        
+        # ============== RISK DATA ==============
+        print(f"\n[4/4] Processing RISK data on {self.n_workers} cores...")
+        with Pool(processes=self.n_workers) as pool:
+            risk_results = pool.map(process_symbol_risk_static, symbols_data)
+        self._aggregate_results('risk', risk_results, is_regression=True)
+        
+        print(f"\n{'='*60}")
+        print("DATA PROCESSING COMPLETE")
+        print(f"{'='*60}")
         
         return self.data
     
-    def _prepare_scalp_data(self, raw_data: Dict):
-        """Prepare scalp model training data"""
-        print("\nPreparing SCALP data...")
-        
+    def _aggregate_results(self, model_type: str, results: List, is_regression: bool = False):
+        """Агрегация результатов параллельной обработки"""
         all_features = []
         all_targets = []
         feature_names = None
         expected_features = None
         
-        for symbol, tf_data in raw_data.items():
-            if '5m' not in tf_data:
-                continue
-            
-            try:
-                df = tf_data['5m'].copy()
-                df, f_names = build_scalp_features(
-                    df,
-                    horizon=PREDICTION_HORIZON['scalp'],
-                    threshold=PRICE_MOVE_THRESHOLD['scalp'] / 100
-                )
+        valid_count = 0
+        for result in results:
+            if result is not None:
+                X, y, f_names = result
+                if feature_names is None:
+                    feature_names = f_names
+                    expected_features = len(f_names)
                 
-                if len(df) > 100 and 'target' in df.columns:
-                    if feature_names is None:
-                        feature_names = f_names
-                        expected_features = len(f_names)
-                    
-                    if len(f_names) != expected_features:
-                        print(f"  Skipping {symbol}: {len(f_names)} features (expected {expected_features})")
-                        continue
-                    
-                    X = df[feature_names].values
-                    y = df['target'].values
-                    valid_mask = ~np.isnan(y)
-                    all_features.append(X[valid_mask].astype(np.float32))
-                    all_targets.append(y[valid_mask].astype(np.int32))
-                    
-            except Exception as e:
-                print(f"  Error processing {symbol}: {e}")
+                if len(f_names) == expected_features:
+                    all_features.append(X)
+                    all_targets.append(y)
+                    valid_count += 1
         
         if all_features:
             X = np.vstack(all_features)
             y = np.concatenate(all_targets)
             X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+            if is_regression:
+                y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
             
-            self.data['scalp'] = {
-                'X': X,
-                'y': y,
-                'feature_names': feature_names
-            }
-            print(f"  SCALP: {X.shape[0]:,} samples, {X.shape[1]} features")
+            self.data[model_type] = {'X': X, 'y': y, 'feature_names': feature_names}
+            print(f"  ✓ {model_type.upper()}: {X.shape[0]:,} samples, {X.shape[1]} features from {valid_count} symbols")
         else:
-            print("  No scalp data available")
-    
-    def _prepare_intraday_data(self, raw_data: Dict):
-        """Prepare intraday model training data"""
-        print("\nPreparing INTRADAY data...")
-        
-        all_features = []
-        all_targets = []
-        feature_names = None
-        expected_features = None
-        
-        for symbol, tf_data in raw_data.items():
-            if '1h' not in tf_data:
-                continue
-            
-            try:
-                df = tf_data['1h'].copy()
-                df, f_names = build_intraday_features(
-                    df,
-                    horizon=PREDICTION_HORIZON['intraday'],
-                    threshold=PRICE_MOVE_THRESHOLD['intraday'] / 100
-                )
-                
-                if len(df) > 50 and 'target' in df.columns:
-                    if feature_names is None:
-                        feature_names = f_names
-                        expected_features = len(f_names)
-                    
-                    if len(f_names) != expected_features:
-                        print(f"  Skipping {symbol}: {len(f_names)} features (expected {expected_features})")
-                        continue
-                    
-                    X = df[feature_names].values
-                    y = df['target'].values
-                    valid_mask = ~np.isnan(y)
-                    all_features.append(X[valid_mask].astype(np.float32))
-                    all_targets.append(y[valid_mask].astype(np.int32))
-                    
-            except Exception as e:
-                print(f"  Error processing {symbol}: {e}")
-        
-        if all_features:
-            X = np.vstack(all_features)
-            y = np.concatenate(all_targets)
-            X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-            
-            self.data['intraday'] = {
-                'X': X,
-                'y': y,
-                'feature_names': feature_names
-            }
-            print(f"  INTRADAY: {X.shape[0]:,} samples, {X.shape[1]} features")
-        else:
-            print("  No intraday data available")
-    
-    def _prepare_swing_data(self, raw_data: Dict):
-        """Prepare swing model training data"""
-        print("\nPreparing SWING data...")
-        
-        all_features = []
-        all_targets = []
-        feature_names = None
-        expected_features = None
-        
-        for symbol, tf_data in raw_data.items():
-            if '1d' not in tf_data:
-                continue
-            
-            try:
-                df = tf_data['1d'].copy()
-                
-                # Adaptive horizon based on data size
-                adaptive_horizon = min(PREDICTION_HORIZON['swing'], max(1, len(df) // 10))
-                
-                df, f_names = build_swing_features(
-                    df,
-                    horizon=adaptive_horizon,
-                    threshold=PRICE_MOVE_THRESHOLD['swing'] / 100
-                )
-                
-                if len(df) > 30 and 'target' in df.columns:
-                    if feature_names is None:
-                        feature_names = f_names
-                        expected_features = len(f_names)
-                    
-                    if len(f_names) != expected_features:
-                        print(f"  Skipping {symbol}: {len(f_names)} features (expected {expected_features})")
-                        continue
-                    
-                    X = df[feature_names].values
-                    y = df['target'].values
-                    valid_mask = ~np.isnan(y)
-                    all_features.append(X[valid_mask].astype(np.float32))
-                    all_targets.append(y[valid_mask].astype(np.int32))
-                    
-            except Exception as e:
-                print(f"  Error processing {symbol}: {e}")
-        
-        if all_features:
-            X = np.vstack(all_features)
-            y = np.concatenate(all_targets)
-            X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-            
-            self.data['swing'] = {
-                'X': X,
-                'y': y,
-                'feature_names': feature_names
-            }
-            print(f"  SWING: {X.shape[0]:,} samples, {X.shape[1]} features")
-        else:
-            print("  No swing data available")
-    
-    def _prepare_risk_data(self, raw_data: Dict):
-        """Prepare risk model training data"""
-        print("\nPreparing RISK data...")
-        
-        all_features = []
-        all_targets = []
-        feature_names = None
-        expected_features = None
-        
-        for symbol, tf_data in raw_data.items():
-            if '5m' not in tf_data:
-                continue
-            
-            try:
-                df = tf_data['5m'].copy()
-                df, f_names = build_risk_features(df)
-                
-                if len(df) > 100:
-                    if feature_names is None:
-                        feature_names = f_names
-                        expected_features = len(f_names)
-                    
-                    if len(f_names) != expected_features:
-                        print(f"  Skipping {symbol}: {len(f_names)} features (expected {expected_features})")
-                        continue
-                    
-                    X = df[feature_names].values
-                    df['future_vol'] = df['close'].pct_change().rolling(20).std().shift(-20)
-                    y = df['future_vol'].values
-                    valid_mask = ~np.isnan(y) & ~np.isnan(X).any(axis=1)
-                    all_features.append(X[valid_mask].astype(np.float32))
-                    all_targets.append(y[valid_mask].astype(np.float32))
-                    
-            except Exception as e:
-                print(f"  Error processing {symbol}: {e}")
-        
-        if all_features:
-            X = np.vstack(all_features)
-            y = np.concatenate(all_targets)
-            X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-            y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
-            
-            self.data['risk'] = {
-                'X': X,
-                'y': y,
-                'feature_names': feature_names
-            }
-            print(f"  RISK: {X.shape[0]:,} samples, {X.shape[1]} features")
-        else:
-            print("  No risk data available")
+            print(f"  ✗ No {model_type} data available")
     
     def _create_objective(self, model_type: str) -> callable:
         """Create Optuna objective function for given model type"""
@@ -827,6 +818,8 @@ def main():
     python train.py --continue-study          # Продолжить оптимизацию
     python train.py --best                    # Обучить с лучшими параметрами
     python train.py --trials 100 --timeout 3600  # 1 час максимум
+    python train.py --workers 8               # Использовать 8 ядер для обработки данных
+    python train.py --workers -1              # Использовать ВСЕ ядра CPU (по умолчанию)
         """
     )
     
@@ -852,8 +845,10 @@ def main():
                         help='Which model to train (default: all)')
     parser.add_argument('--gpu', action='store_true',
                         help='Use GPU for training')
-    parser.add_argument('--jobs', type=int, default=1,
-                        help='Parallel jobs for Optuna (default: 1)')
+    parser.add_argument('--jobs', type=int, default=-1,
+                        help='Parallel jobs for Optuna trials (default: -1 = all cores)')
+    parser.add_argument('--workers', type=int, default=-1,
+                        help='Number of CPU workers for data processing (default: -1 = all cores)')
     
     # Data settings
     parser.add_argument('--data-path', type=str, default=None,
@@ -861,12 +856,19 @@ def main():
     
     args = parser.parse_args()
     
+    # Determine actual number of workers
+    actual_workers = N_CORES if args.workers == -1 else min(args.workers, N_CORES)
+    actual_jobs = N_CORES if args.jobs == -1 else min(args.jobs, N_CORES)
+    
     print("\n" + "="*60)
     print("AI CRYPTO TRAINER")
     print("="*60)
     print(f"Time: {datetime.now()}")
     print(f"Model: {args.model}")
     print(f"GPU: {args.gpu}")
+    print(f"CPU Cores Available: {N_CORES}")
+    print(f"Data Processing Workers: {actual_workers}")
+    print(f"Optuna Parallel Jobs: {actual_jobs}")
     
     if args.fast:
         print("Mode: FAST (no Optuna)")
@@ -882,10 +884,11 @@ def main():
         model_type=args.model,
         use_gpu=args.gpu,
         n_trials=args.trials,
-        n_jobs=args.jobs,
+        n_jobs=actual_jobs,
         timeout=args.timeout,
         study_name=args.study_name,
-        continue_study=args.continue_study
+        continue_study=args.continue_study,
+        n_workers=actual_workers
     )
     
     # Load data

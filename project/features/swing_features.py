@@ -163,7 +163,7 @@ def add_btc_dominance_features(df: pd.DataFrame, btc_dominance: pd.Series = None
             right_index=True,
             how='left'
         )
-        df['btc_dominance'] = df['btc_dominance'].fillna(method='ffill')
+        df['btc_dominance'] = df['btc_dominance'].ffill()
         
         # Dominance change
         df['dominance_change_5d'] = df['btc_dominance'].pct_change(5)
@@ -321,7 +321,7 @@ def add_derivatives_features_swing(df: pd.DataFrame) -> pd.DataFrame:
     # Open Interest Features (long-term)
     # =========================
     if 'sum_open_interest' in df.columns:
-        oi = df['sum_open_interest'].fillna(method='ffill')
+        oi = df['sum_open_interest'].ffill()
         
         # OI trend
         df['oi_ma_7d'] = oi.rolling(min(7, min_w)).mean()
@@ -429,13 +429,14 @@ def add_target_swing(df: pd.DataFrame, horizon: int = 7, threshold: float = 0.03
     """
     future_return = df['close'].shift(-horizon) / df['close'] - 1
     
-    df['target'] = 0  # flat
-    df.loc[future_return > threshold, 'target'] = 1   # up
-    df.loc[future_return < -threshold, 'target'] = -1  # down
+    # Создаём target как Series, затем присваиваем
+    target = pd.Series(1, index=df.index)  # flat по умолчанию
+    target.loc[future_return > threshold] = 2   # up
+    target.loc[future_return < -threshold] = 0  # down
     
-    # Для LightGBM: 0=down, 1=flat, 2=up
-    df['target'] = df['target'].map({-1: 0, 0: 1, 1: 2})
-    
+    # Присваиваем сразу обе колонки через copy для избежания фрагментации
+    df = df.copy()
+    df['target'] = target
     df['future_return'] = future_return
     
     return df

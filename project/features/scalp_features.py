@@ -268,14 +268,14 @@ def add_target_scalp(df: pd.DataFrame, horizon: int = 12, threshold: float = 0.0
     """
     future_return = df['close'].shift(-horizon) / df['close'] - 1
     
-    df['target'] = 0  # flat
-    df.loc[future_return > threshold, 'target'] = 1   # up
-    df.loc[future_return < -threshold, 'target'] = -1  # down (будет 2 для LightGBM)
+    # Создаём target как Series для избежания фрагментации
+    target = pd.Series(1, index=df.index)  # flat по умолчанию
+    target.loc[future_return > threshold] = 2   # up
+    target.loc[future_return < -threshold] = 0  # down
     
-    # Для LightGBM: переводим в 0, 1, 2
-    df['target'] = df['target'].map({-1: 0, 0: 1, 1: 2})
-    
-    # Сохраняем future return для расчёта expected return
+    # Присваиваем через copy для избежания фрагментации
+    df = df.copy()
+    df['target'] = target
     df['future_return'] = future_return
     
     return df

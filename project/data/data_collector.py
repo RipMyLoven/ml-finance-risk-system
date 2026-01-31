@@ -12,10 +12,14 @@ Data Collector - сбор данных с Binance API
 Поддерживает работу:
 - С API ключами (приватные данные)
 - Без ключей (только публичные данные через REST API)
+
+Использует все ядра CPU для параллельного сбора данных.
 """
 
 import os
 import time
+import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -23,6 +27,9 @@ from typing import List, Dict, Optional
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# Количество доступных ядер CPU
+N_CORES = mp.cpu_count()
 
 try:
     from binance.client import Client
@@ -62,9 +69,12 @@ class BinanceDataCollector:
         "12h": 720, "1d": 1440, "3d": 4320, "1w": 10080
     }
     
-    def __init__(self, api_key: str = None, api_secret: str = None):
+    def __init__(self, api_key: str = None, api_secret: str = None, n_workers: int = -1):
         self.api_key = api_key or BINANCE_API_KEY
         self.api_secret = api_secret or BINANCE_API_SECRET
+        
+        # Parallel processing settings
+        self.n_workers = N_CORES if n_workers == -1 else min(n_workers, N_CORES)
         
         # Setup session with retries
         self.session = self._create_session()
@@ -394,7 +404,7 @@ class BinanceDataCollector:
         days: int = None
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
-        Собрать данные по всем символам
+        Собрать данные по всем символам ПАРАЛЛЕЛЬНО
         
         Returns:
             Dict[symbol][timeframe] = DataFrame
@@ -404,11 +414,42 @@ class BinanceDataCollector:
         
         all_data = {}
         
-        for symbol in symbols:
-            print(f"Collecting data for {symbol}...")
-            all_data[symbol] = self.collect_multi_timeframe_data(symbol, days)
+        print(f"Collecting data for {len(symbols)} symbols using {self.n_workers} workers...")
         
+        if self.n_workers > 1 and len(symbols) > 1:
+            # Параллельный сбор данных с ThreadPoolExecutor
+            # (ThreadPool лучше для I/O-bound операций как HTTP запросы)
+            with ThreadPoolExecutor(max_workers=self.n_workers) as executor:
+                futures = {
+                    executor.submit(self._collect_symbol_data, symbol, days): symbol
+                    for symbol in symbols
+                }
+                
+                for future in as_completed(futures):
+                    symbol = futures[future]
+                    try:
+                        data = future.result()
+                        if data:
+                            all_data[symbol] = data
+                            print(f"  ✓ {symbol} collected ({len(data)} timeframes)")
+                    except Exception as e:
+                        print(f"  ✗ Error collecting {symbol}: {e}")
+        else:
+            # Последовательный сбор
+            for symbol in symbols:
+                print(f"Collecting data for {symbol}...")
+                all_data[symbol] = self.collect_multi_timeframe_data(symbol, days)
+        
+        print(f"Data collection complete: {len(all_data)} symbols")
         return all_data
+    
+    def _collect_symbol_data(self, symbol: str, days: int) -> Dict[str, pd.DataFrame]:
+        """Сбор данных для одного символа (вызывается параллельно)"""
+        try:
+            return self.collect_multi_timeframe_data(symbol, days)
+        except Exception as e:
+            print(f"Error collecting {symbol}: {e}")
+            return {}
     
     def get_btc_correlation(
         self,
