@@ -1,0 +1,18 @@
+{
+  "status": "INACTIVE",
+  "conditions": {
+    "max_drawdown": 0.2,
+    "max_consecutive_losses": 5,
+    "max_hourly_losses": 10,
+    "max_daily_loss_percent": 5.0
+  },
+  "auto_triggers": [
+    "API connection failure",
+    "Model prediction error rate > 10%",
+    "Risk model CVaR violation",
+    "Position limit breach"
+  ],
+  "emergency_contacts": [
+    "trading@example.com"
+  ]
+}

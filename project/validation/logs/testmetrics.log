@@ -1,0 +1,5 @@
+2026-02-01 23:54:19 | [32mINFO[0m | TestMetrics          | METRIC | auc_roc=0.856000 | model=scalp | split=validation
+2026-02-01 23:54:19 | [32mINFO[0m | TestMetrics          | METRIC | accuracy=0.723000 | model=scalp | split=validation
+2026-02-01 23:54:19 | [32mINFO[0m | TestMetrics          | METRIC | log_loss=0.445000 | model=scalp | split=validation
+2026-02-01 23:54:19 | [32mINFO[0m | TestMetrics          | METRIC | sharpe_ratio=1.520000 | strategy=ensemble | period=backtest
+2026-02-01 23:54:19 | [32mINFO[0m | TestMetrics          | METRIC | max_drawdown=-0.082000 | strategy=ensemble | period=backtest

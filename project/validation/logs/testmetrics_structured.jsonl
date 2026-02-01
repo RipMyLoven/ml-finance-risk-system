@@ -1,0 +1,5 @@
+{"timestamp": "2026-02-01T23:54:19.636594", "level": "METRIC", "logger": "TestMetrics", "message": "auc_roc", "context": {"value": 0.856, "model": "scalp", "split": "validation"}}
+{"timestamp": "2026-02-01T23:54:19.637231", "level": "METRIC", "logger": "TestMetrics", "message": "accuracy", "context": {"value": 0.723, "model": "scalp", "split": "validation"}}
+{"timestamp": "2026-02-01T23:54:19.637643", "level": "METRIC", "logger": "TestMetrics", "message": "log_loss", "context": {"value": 0.445, "model": "scalp", "split": "validation"}}
+{"timestamp": "2026-02-01T23:54:19.638229", "level": "METRIC", "logger": "TestMetrics", "message": "sharpe_ratio", "context": {"value": 1.52, "strategy": "ensemble", "period": "backtest"}}
+{"timestamp": "2026-02-01T23:54:19.638979", "level": "METRIC", "logger": "TestMetrics", "message": "max_drawdown", "context": {"value": -0.082, "strategy": "ensemble", "period": "backtest"}}

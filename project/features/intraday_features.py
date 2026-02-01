@@ -460,11 +460,15 @@ def build_intraday_features(
     df = add_target_intraday(df, horizon, threshold)
     
     # Исключаем служебные колонки
+    # CRITICAL: Drop future_return to prevent leakage
+    if 'future_return' in df.columns:
+        df = df.drop(columns=['future_return'])
+    
     exclude_cols = [
         'open', 'high', 'low', 'close', 'volume',
         'quote_volume', 'trades', 'taker_buy_base', 'taker_buy_quote',
         'taker_buy_volume', 'taker_buy_quote_volume',
-        'buy_ratio', 'target', 'future_return',
+        'buy_ratio', 'target', 'future_return',  # Already dropped above, but keep in list for safety
         'sma_10', 'sma_20', 'sma_50', 'typical_price',
         'vwap_cum_vol', 'vwap_cum_tp_vol', 'vwap', 'vwap_10', 'vwap_20',
         'vwap_upper', 'vwap_lower', 'bb_upper', 'bb_lower',

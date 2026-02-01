@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "seed_verification": {
+    "python": true,
+    "numpy": true,
+    "lightgbm": true,
+    "optuna": true
+  },
+  "determinism_tests": {
+    "same_seed_same_output": true,
+    "different_seed_different_output": true,
+    "hash_match": true
+  },
+  "artifacts_saved": {
+    "onnx_intraday_validated": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\onnx_models\\intraday_validated.onnx",
+    "onnx_risk_validated": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\onnx_models\\risk_validated.onnx",
+    "onnx_scalp_validated": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\onnx_models\\scalp_validated.onnx",
+    "onnx_swing_validated": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\onnx_models\\swing_validated.onnx",
+    "scaler_scalp": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\scalers\\scalp_scaler.pkl",
+    "scaler_intraday": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\scalers\\intraday_scaler.pkl",
+    "scaler_swing": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\scalers\\swing_scaler.pkl",
+    "scaler_risk": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\scalers\\risk_scaler.pkl",
+    "label_encoder": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\encoders\\label_encoder.pkl",
+    "feature_config": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\configs\\feature_config.json",
+    "best_params": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\configs\\best_hyperparameters.json",
+    "inference_pipeline": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\inference_pipeline.py"
+  },
+  "kill_switch_status": {
+    "configured": true,
+    "config_path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\kill_switch_config.json",
+    "handler_path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\kill_switch_handler.py",
+    "active": false
+  },
+  "warnings": [],
+  "errors": [],
+  "timestamp": "2026-02-01T23:55:45.587085"
+}

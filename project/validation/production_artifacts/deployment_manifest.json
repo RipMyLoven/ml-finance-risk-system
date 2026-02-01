@@ -1,0 +1,109 @@
+{
+  "name": "crypto-trading-system",
+  "version": "1.0.0",
+  "generated_at": "2026-02-01T23:55:45.584490",
+  "seed_config": {
+    "numpy": 42,
+    "python": 42,
+    "lightgbm": 42,
+    "optuna": 42
+  },
+  "artifacts": {
+    "onnx_intraday_validated": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\onnx_models\\intraday_validated.onnx",
+      "exists": true
+    },
+    "onnx_risk_validated": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\onnx_models\\risk_validated.onnx",
+      "exists": true
+    },
+    "onnx_scalp_validated": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\onnx_models\\scalp_validated.onnx",
+      "exists": true
+    },
+    "onnx_swing_validated": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\onnx_models\\swing_validated.onnx",
+      "exists": true
+    },
+    "scaler_scalp": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\scalers\\scalp_scaler.pkl",
+      "exists": true
+    },
+    "scaler_intraday": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\scalers\\intraday_scaler.pkl",
+      "exists": true
+    },
+    "scaler_swing": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\scalers\\swing_scaler.pkl",
+      "exists": true
+    },
+    "scaler_risk": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\scalers\\risk_scaler.pkl",
+      "exists": true
+    },
+    "label_encoder": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\encoders\\label_encoder.pkl",
+      "exists": true
+    },
+    "feature_config": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\configs\\feature_config.json",
+      "exists": true
+    },
+    "best_params": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\configs\\best_hyperparameters.json",
+      "exists": true
+    },
+    "inference_pipeline": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\production_artifacts\\inference_pipeline.py",
+      "exists": true
+    }
+  },
+  "dependencies": {
+    "python": ">=3.8",
+    "packages": [
+      "lightgbm>=3.3.0",
+      "onnxruntime>=1.10.0",
+      "numpy>=1.20.0",
+      "pandas>=1.3.0",
+      "scikit-learn>=1.0.0"
+    ]
+  },
+  "models": {
+    "scalp": {
+      "type": "classification",
+      "classes": [
+        "buy",
+        "sell",
+        "hold"
+      ]
+    },
+    "intraday": {
+      "type": "classification",
+      "classes": [
+        "buy",
+        "sell",
+        "hold"
+      ]
+    },
+    "swing": {
+      "type": "classification",
+      "classes": [
+        "buy",
+        "sell",
+        "hold"
+      ]
+    },
+    "risk": {
+      "type": "regression"
+    }
+  },
+  "deployment_checklist": [
+    "\u2610 Verify all ONNX models loaded correctly",
+    "\u2610 Run inference test with sample data",
+    "\u2610 Verify kill switch mechanism",
+    "\u2610 Configure monitoring/alerting",
+    "\u2610 Set up logging infrastructure",
+    "\u2610 Review risk parameters",
+    "\u2610 Perform dry-run trading session"
+  ]
+}

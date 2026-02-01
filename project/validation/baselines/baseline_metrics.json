@@ -1,0 +1,32 @@
+{
+  "scalp": {
+    "accuracy": 0.41342619020436117,
+    "accuracy_std": 0.026025300800755935,
+    "log_loss": 1.109067371682118,
+    "auc": 0.5544048706037669,
+    "auc_std": 0.01713966380461735,
+    "n_samples": 52559,
+    "n_features": 22,
+    "type": "classification"
+  },
+  "intraday": {
+    "accuracy": 0.6622902157780569,
+    "accuracy_std": 0.11809065321933232,
+    "log_loss": 0.846607426802502,
+    "auc": 0.6013542187686846,
+    "auc_std": 0.04118824788253127,
+    "n_samples": 52559,
+    "n_features": 22,
+    "type": "classification"
+  },
+  "swing": {
+    "accuracy": 0.9219545610229478,
+    "accuracy_std": 0.05111530193936737,
+    "log_loss": 0.34449125381877704,
+    "auc": 0.6106563394015366,
+    "auc_std": 0.045017615463722946,
+    "n_samples": 52559,
+    "n_features": 22,
+    "type": "classification"
+  }
+}

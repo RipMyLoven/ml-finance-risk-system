@@ -1,0 +1,8 @@
+{"timestamp": "2026-02-01T23:54:19.631691", "level": "PARAM", "logger": "TestParams", "message": "model_type", "context": {"value": "LightGBM"}}
+{"timestamp": "2026-02-01T23:54:19.632295", "level": "PARAM", "logger": "TestParams", "message": "hyperparameters.n_estimators", "context": {"value": 100}}
+{"timestamp": "2026-02-01T23:54:19.632847", "level": "PARAM", "logger": "TestParams", "message": "hyperparameters.max_depth", "context": {"value": 6}}
+{"timestamp": "2026-02-01T23:54:19.633327", "level": "PARAM", "logger": "TestParams", "message": "hyperparameters.learning_rate", "context": {"value": 0.1}}
+{"timestamp": "2026-02-01T23:54:19.633941", "level": "PARAM", "logger": "TestParams", "message": "hyperparameters.num_leaves", "context": {"value": 31}}
+{"timestamp": "2026-02-01T23:54:19.634317", "level": "PARAM", "logger": "TestParams", "message": "training.n_samples", "context": {"value": 10000}}
+{"timestamp": "2026-02-01T23:54:19.634842", "level": "PARAM", "logger": "TestParams", "message": "training.n_features", "context": {"value": 20}}
+{"timestamp": "2026-02-01T23:54:19.635423", "level": "PARAM", "logger": "TestParams", "message": "training.cv_folds", "context": {"value": 5}}

@@ -1,0 +1,72 @@
+{
+  "version": "2026-02-01T23:51:32.217319",
+  "configs": {
+    "scalp": [
+      "rsi_14",
+      "rsi_21",
+      "rsi_7",
+      "volume_ratio_10",
+      "volume_ratio_20"
+    ],
+    "intraday": [
+      "bb_position"
+    ],
+    "swing": [
+      "rsi_14",
+      "rsi_21",
+      "rsi_7",
+      "volume_ratio_10"
+    ],
+    "risk": [
+      "rsi_14",
+      "rsi_21",
+      "rsi_7",
+      "volume_ratio_10",
+      "volume_ratio_20"
+    ],
+    "all": [
+      "atr_14",
+      "atr_norm",
+      "bb_lower",
+      "bb_middle",
+      "bb_position",
+      "bb_upper",
+      "drawdown_20",
+      "ema_10",
+      "ema_20",
+      "ema_50",
+      "log_return_1",
+      "log_return_10",
+      "log_return_5",
+      "macd_hist",
+      "macd_line",
+      "macd_signal",
+      "max_dd_60",
+      "micro_vol_10",
+      "micro_vol_20",
+      "rsi_14",
+      "rsi_21",
+      "rsi_7",
+      "sma_10",
+      "sma_20",
+      "sma_50",
+      "volatility_20",
+      "volume_ratio_10",
+      "volume_ratio_20"
+    ]
+  },
+  "stats": {
+    "total_original": 28,
+    "total_removed": 75,
+    "scalp_final": 5,
+    "intraday_final": 1,
+    "swing_final": 4,
+    "risk_final": 5
+  },
+  "removal_reasons": {
+    "high_correlation": 38,
+    "high_vif": 10,
+    "unstable": 6,
+    "low_variance": 21
+  }
+}

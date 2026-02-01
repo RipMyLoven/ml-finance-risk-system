@@ -1,0 +1,3 @@
+2026-02-01 23:54:19 | [32mINFO[0m | TestBasic            | Info message test | component=test
+2026-02-01 23:54:19 | [33mWARNING[0m | TestBasic            | Warning message test | component=test
+2026-02-01 23:54:19 | [31mERROR[0m | TestBasic            | Error message test | component=test

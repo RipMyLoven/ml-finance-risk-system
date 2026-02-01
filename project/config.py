@@ -134,3 +134,72 @@ REGIME_THRESHOLDS = {
     "bear": -0.02,   # Return < -2% = bear
     # Между ними = flat
 }
+
+# ============== ADVANCED RISK MODEL ==============
+# CVaR (Conditional Value at Risk) Configuration
+CVAR_CONFIG = {
+    "confidence_level": 0.95,       # 95% confidence for CVaR
+    "default_window": 252,          # ~1 year rolling window
+    "min_samples": 30,              # Minimum samples for calculation
+    "stress_multiplier": 1.5,       # Multiplier for stress CVaR
+    "block_threshold": 0.08,        # Block trades when CVaR > 8%
+    "model_limits": {
+        "scalp": 0.05,              # 5% CVaR limit for scalp
+        "intraday": 0.07,           # 7% for intraday
+        "swing": 0.10,              # 10% for swing
+        "portfolio": 0.08           # 8% for portfolio
+    }
+}
+
+# Kelly Position Sizing Configuration
+KELLY_CONFIG = {
+    "mode": "quarter",              # quarter, half, adaptive
+    "max_kelly_fraction": 0.25,     # Never use more than 25% of Kelly
+    "max_leverage": 5.0,            # Maximum leverage globally
+    "max_position_pct": 0.10,       # Max 10% in single position
+    "min_win_rate": 0.35,           # Minimum required win rate
+    "base_volatility": 0.02,        # Base volatility for scaling
+    "model_leverage_limits": {
+        "scalp": 10.0,              # Scalp can use higher leverage
+        "intraday": 5.0,
+        "swing": 3.0
+    }
+}
+
+# Drawdown Controller Configuration
+DRAWDOWN_CONFIG = {
+    # Position sizing reduction thresholds
+    "level_1": 0.05,                # 5% DD → 75% position size
+    "level_2": 0.10,                # 10% DD → 50% position size
+    "level_3": 0.15,                # 15% DD → 25% position size
+    "level_4": 0.20,                # 20% DD → risk-off only
+    "emergency": 0.25,              # 25% DD → emergency stop
+    
+    # Model disable thresholds
+    "scalp_disable": 0.08,          # Disable scalp at 8% DD
+    "intraday_disable": 0.12,       # Disable intraday at 12% DD
+    "swing_disable": 0.18,          # Disable swing at 18% DD
+    
+    # Recovery thresholds
+    "recovery_to_reduced": 0.5,     # 50% recovery → reduced risk
+    "recovery_to_full": 0.8,        # 80% recovery → full risk
+}
+
+# Risk Model Paths
+RISK_MODEL_PATHS = {
+    "pkl": "models/risk_lgbm.pkl",
+    "onnx": "models/risk_lgbm.onnx",
+    "txt": "models/risk_lgbm.txt",
+    "optimized_pkl": "optuna_studies/risk_model_optimized.pkl",
+    "optimized_onnx": "optuna_studies/risk_model_optimized.onnx"
+}
+
+# Inference Pipeline Configuration
+INFERENCE_CONFIG = {
+    "max_latency_ms": 100.0,        # Maximum acceptable latency
+    "enable_kill_switch": True,     # Enable emergency kill switch
+    "enable_monitoring": True,      # Enable real-time monitoring
+    "max_risk_score": 0.9,          # Auto-block above this
+    "min_confidence": 0.3,          # Warn below this
+    "regime_shift_window": 50,      # Periods for regime detection
+}

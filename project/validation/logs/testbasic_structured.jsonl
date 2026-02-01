@@ -1,0 +1,4 @@
+{"timestamp": "2026-02-01T23:54:19.625776", "level": "DEBUG", "logger": "TestBasic", "message": "Debug message test", "context": {"component": "test"}}
+{"timestamp": "2026-02-01T23:54:19.626625", "level": "INFO", "logger": "TestBasic", "message": "Info message test", "context": {"component": "test"}}
+{"timestamp": "2026-02-01T23:54:19.627394", "level": "WARNING", "logger": "TestBasic", "message": "Warning message test", "context": {"component": "test"}}
+{"timestamp": "2026-02-01T23:54:19.627904", "level": "ERROR", "logger": "TestBasic", "message": "Error message test", "context": {"component": "test"}}

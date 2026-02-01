@@ -1,0 +1,251 @@
+{
+  "passed": true,
+  "warnings": [
+    "klines_usdt_m_1000SHIBUSDT_15m.csv: Missing columns {'market_type'}",
+    "klines_usdt_m_1000SHIBUSDT_1d.csv: Missing columns {'market_type'}",
+    "klines_usdt_m_1000SHIBUSDT_1h.csv: Missing columns {'market_type'}",
+    "klines_usdt_m_1000SHIBUSDT_1m.csv: Missing columns {'market_type'}",
+    "klines_usdt_m_1000SHIBUSDT_4h.csv: Missing columns {'market_type'}",
+    "Structure issues in 5 files",
+    "Outliers found in 9 files",
+    "Potential look-ahead bias: 3 issues",
+    "Potential target leakage: 2 features"
+  ],
+  "errors": [],
+  "stats": {
+    "total_files": 1219,
+    "structure_errors": 5,
+    "timeframes": [
+      "1d",
+      "1h",
+      "4h",
+      "5m",
+      "1m",
+      "15m"
+    ],
+    "n_symbols": 102,
+    "symbols": [
+      "1000SHIBUSDT",
+      "1000XECUSDT",
+      "1INCHUSDT",
+      "AAVEUSDT",
+      "ADAUSDT",
+      "ALGOUSDT",
+      "ALICEUSDT",
+      "ANKRUSDT",
+      "APEUSDT",
+      "API3USDT",
+      "ARPAUSDT",
+      "ARUSDT",
+      "ATAUSDT",
+      "ATOMUSDT",
+      "AVAXUSDT",
+      "AXSUSDT",
+      "BANDUSDT",
+      "BATUSDT",
+      "BCHUSDT",
+      "BELUSDT",
+      "BNBUSDT",
+      "BTCDOMUSDT",
+      "BTCUSDT",
+      "C98USDT",
+      "CELOUSDT",
+      "CELRUSDT",
+      "CHRUSDT",
+      "CHZUSDT",
+      "COMPUSDT",
+      "COTIUSDT",
+      "CRVUSDT",
+      "CTSIUSDT",
+      "DASHUSDT",
+      "DENTUSDT",
+      "DOGEUSDT",
+      "DOTUSDT",
+      "DUSKUSDT",
+      "DYDXUSDT",
+      "EGLDUSDT",
+      "ENJUSDT",
+      "ENSUSDT",
+      "ETCUSDT",
+      "ETHUSDT",
+      "FILUSDT",
+      "FLOWUSDT",
+      "GALAUSDT",
+      "GMTUSDT",
+      "GRTUSDT",
+      "GTCUSDT",
+      "HBARUSDT",
+      "HOTUSDT",
+      "ICXUSDT",
+      "IMXUSDT",
+      "IOSTUSDT",
+      "IOTAUSDT",
+      "IOTXUSDT",
+      "JASMYUSDT",
+      "KAVAUSDT",
+      "KNCUSDT",
+      "KSMUSDT",
+      "LINKUSDT",
+      "LPTUSDT",
+      "LRCUSDT",
+      "LTCUSDT",
+      "MANAUSDT",
+      "MASKUSDT",
+      "MTLUSDT",
+      "NEARUSDT",
+      "NEOUSDT",
+      "NKNUSDT",
+      "OGNUSDT",
+      "ONEUSDT",
+      "ONTUSDT",
+      "PEOPLEUSDT",
+      "QTUMUSDT",
+      "RLCUSDT",
+      "ROSEUSDT",
+      "RSRUSDT",
+      "RUNEUSDT",
+      "RVNUSDT",
+      "SANDUSDT",
+      "SFPUSDT",
+      "SKLUSDT",
+      "SNXUSDT",
+      "SOLUSDT",
+      "STORJUSDT",
+      "SUSHIUSDT",
+      "THETAUSDT",
+      "TRBUSDT",
+      "TRXUSDT",
+      "UNIUSDT",
+      "VETUSDT",
+      "WOOUSDT",
+      "XLMUSDT",
+      "XMRUSDT",
+      "XRPUSDT",
+      "XTZUSDT",
+      "YFIUSDT",
+      "ZECUSDT",
+      "ZENUSDT",
+      "ZILUSDT",
+      "ZRXUSDT"
+    ],
+    "data_types": [
+      "mark_price",
+      "open_interest",
+      "premium_index",
+      "taker_volume",
+      "klines",
+      "long_short_ratio",
+      "funding_rate"
+    ],
+    "feature_types": {
+      "scalp": [
+        "5m",
+        "15m"
+      ],
+      "intraday": [
+        "1h",
+        "4h",
+        "12h"
+      ],
+      "swing": [
+        "1d",
+        "3d",
+        "1w"
+      ],
+      "risk": [
+        "1d",
+        "1h",
+        "4h",
+        "5m",
+        "1m",
+        "15m"
+      ]
+    },
+    "nan_report": {},
+    "outlier_report": {
+      "klines_usdt_m_1000SHIBUSDT_15m.csv": {
+        "volume": "69"
+      },
+      "klines_usdt_m_1000SHIBUSDT_1h.csv": {
+        "volume": "18"
+      },
+      "klines_usdt_m_1000SHIBUSDT_1m.csv": {
+        "volume": "1311"
+      },
+      "klines_usdt_m_1000SHIBUSDT_4h.csv": {
+        "volume": "1"
+      },
+      "klines_usdt_m_1000SHIBUSDT_5m.csv": {
+        "volume": "237"
+      },
+      "klines_usdt_m_1000XECUSDT_15m.csv": {
+        "volume": "226"
+      },
+      "klines_usdt_m_1000XECUSDT_1d.csv": {
+        "volume": "2"
+      },
+      "klines_usdt_m_1000XECUSDT_1h.csv": {
+        "volume": "54"
+      },
+      "klines_usdt_m_1000XECUSDT_1m.csv": {
+        "volume": "3123"
+      }
+    },
+    "temporal_issues": [],
+    "lookahead_issues": [
+      "fast_features.py: Variable named 'future'",
+      "scalp_features.py: Negative shift (future data)",
+      "scalp_features.py: Variable named 'future'"
+    ],
+    "leaky_features": [
+      [
+        "taker_buy_volume",
+        "suspicious name"
+      ],
+      [
+        "taker_buy_quote_volume",
+        "suspicious name"
+      ]
+    ],
+    "total_size_mb": 39057.9,
+    "file_stats": {
+      "funding_rate": {
+        "files": 102,
+        "estimated_rows": 61564,
+        "size_mb": 25.01
+      },
+      "klines": {
+        "files": 612,
+        "estimated_rows": 6815636,
+        "size_mb": 38010.25
+      },
+      "long_short_ratio": {
+        "files": 101,
+        "estimated_rows": 164021,
+        "size_mb": 68.77
+      },
+      "mark_price": {
+        "files": 101,
+        "estimated_rows": 622878,
+        "size_mb": 417.1
+      },
+      "open_interest": {
+        "files": 101,
+        "estimated_rows": 164018,
+        "size_mb": 89.32
+      },
+      "premium_index": {
+        "files": 101,
+        "estimated_rows": 621592,
+        "size_mb": 366.36
+      },
+      "taker_volume": {
+        "files": 101,
+        "estimated_rows": 163688,
+        "size_mb": 81.11
+      }
+    },
+    "data_version": "d78f5413dbfa",
+    "check_timestamp": "2026-02-01T23:51:31.778781"
+  }
+}

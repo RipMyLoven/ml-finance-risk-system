@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "standard": {
+      "format": "%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s",
+      "datefmt": "%Y-%m-%d %H:%M:%S"
+    },
+    "json": {
+      "class": "pythonjsonlogger.jsonlogger.JsonFormatter",
+      "format": "%(timestamp)s %(level)s %(name)s %(message)s"
+    }
+  },
+  "handlers": {
+    "console": {
+      "class": "logging.StreamHandler",
+      "level": "INFO",
+      "formatter": "standard",
+      "stream": "ext://sys.stdout"
+    },
+    "file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "DEBUG",
+      "formatter": "standard",
+      "filename": "logs/trading_system.log",
+      "maxBytes": 10485760,
+      "backupCount": 5
+    },
+    "json_file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "INFO",
+      "formatter": "json",
+      "filename": "logs/trading_system.jsonl",
+      "maxBytes": 10485760,
+      "backupCount": 5
+    }
+  },
+  "loggers": {
+    "DataPipeline": {
+      "level": "INFO",
+      "handlers": [
+        "console",
+        "file"
+      ]
+    },
+    "FeatureEngine": {
+      "level": "INFO",
+      "handlers": [
+        "console",
+        "file"
+      ]
+    },
+    "ModelTraining": {
+      "level": "DEBUG",
+      "handlers": [
+        "console",
+        "file",
+        "json_file"
+      ]
+    },
+    "Validation": {
+      "level": "INFO",
+      "handlers": [
+        "console",
+        "file",
+        "json_file"
+      ]
+    },
+    "RiskManagement": {
+      "level": "INFO",
+      "handlers": [
+        "console",
+        "file",
+        "json_file"
+      ]
+    },
+    "Inference": {
+      "level": "INFO",
+      "handlers": [
+        "console",
+        "file",
+        "json_file"
+      ]
+    },
+    "System": {
+      "level": "WARNING",
+      "handlers": [
+        "console",
+        "file"
+      ]
+    }
+  },
+  "root": {
+    "level": "INFO",
+    "handlers": [
+      "console",
+      "file"
+    ]
+  }
+}

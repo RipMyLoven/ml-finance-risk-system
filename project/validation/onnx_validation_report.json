@@ -1,0 +1,204 @@
+{
+  "passed": true,
+  "warnings": [],
+  "errors": [],
+  "export_results": {
+    "scalp": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\onnx_exports\\scalp_validated.onnx",
+      "size_kb": 329.3486328125,
+      "success": true
+    },
+    "intraday": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\onnx_exports\\intraday_validated.onnx",
+      "size_kb": 329.3486328125,
+      "success": true
+    },
+    "swing": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\onnx_exports\\swing_validated.onnx",
+      "size_kb": 329.3486328125,
+      "success": true
+    },
+    "risk": {
+      "path": "C:\\Users\\ripmy\\Documents\\GitHub\\aiTrainCrypto\\project\\validation\\onnx_exports\\risk_validated.onnx",
+      "size_kb": 109.42578125,
+      "success": true
+    },
+    "versions": {
+      "onnx": "1.20.1",
+      "onnxruntime": "1.23.2",
+      "onnxmltools": "1.16.0",
+      "lightgbm": "4.6.0"
+    }
+  },
+  "io_validation": {
+    "scalp": {
+      "inputs": [
+        {
+          "name": "input",
+          "shape": [
+            null,
+            20
+          ],
+          "dtype": "tensor(float)"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "label",
+          "shape": [
+            1
+          ],
+          "dtype": "tensor(int64)"
+        },
+        {
+          "name": "probabilities",
+          "shape": [],
+          "dtype": "seq(map(int64,tensor(float)))"
+        }
+      ],
+      "model_valid": true
+    },
+    "intraday": {
+      "inputs": [
+        {
+          "name": "input",
+          "shape": [
+            null,
+            20
+          ],
+          "dtype": "tensor(float)"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "label",
+          "shape": [
+            1
+          ],
+          "dtype": "tensor(int64)"
+        },
+        {
+          "name": "probabilities",
+          "shape": [],
+          "dtype": "seq(map(int64,tensor(float)))"
+        }
+      ],
+      "model_valid": true
+    },
+    "swing": {
+      "inputs": [
+        {
+          "name": "input",
+          "shape": [
+            null,
+            20
+          ],
+          "dtype": "tensor(float)"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "label",
+          "shape": [
+            1
+          ],
+          "dtype": "tensor(int64)"
+        },
+        {
+          "name": "probabilities",
+          "shape": [],
+          "dtype": "seq(map(int64,tensor(float)))"
+        }
+      ],
+      "model_valid": true
+    },
+    "risk": {
+      "inputs": [
+        {
+          "name": "input",
+          "shape": [
+            null,
+            20
+          ],
+          "dtype": "tensor(float)"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "variable",
+          "shape": [
+            null,
+            1
+          ],
+          "dtype": "tensor(float)"
+        }
+      ],
+      "model_valid": true
+    }
+  },
+  "output_comparison": {
+    "scalp": {
+      "max_diff": 1.591625583552414e-07,
+      "mean_diff": 2.5062573840948604e-08,
+      "outputs_match": true
+    },
+    "intraday": {
+      "max_diff": 1.5535225716956091e-07,
+      "mean_diff": 2.6637100077817057e-08,
+      "outputs_match": true
+    },
+    "swing": {
+      "max_diff": 1.3291608691456958e-07,
+      "mean_diff": 2.37951443283572e-08,
+      "outputs_match": true
+    },
+    "risk": {
+      "max_diff": 3.204399727785301e-07,
+      "mean_diff": 4.75845780379975e-08,
+      "outputs_match": true
+    }
+  },
+  "latency_tests": {
+    "scalp": {
+      "latencies_by_batch": {
+        "1": 0.015819000000192318,
+        "10": 4.63866500000222,
+        "100": 7.160469999998895
+      },
+      "single_inference_ms": 0.015819000000192318,
+      "threshold_ms": 5,
+      "within_threshold": true
+    },
+    "intraday": {
+      "latencies_by_batch": {
+        "1": 0.016027000001486158,
+        "10": 4.589846000008038,
+        "100": 6.3483890000043175
+      },
+      "single_inference_ms": 0.016027000001486158,
+      "threshold_ms": 10,
+      "within_threshold": true
+    },
+    "swing": {
+      "latencies_by_batch": {
+        "1": 0.01975799999854644,
+        "10": 4.784587000003739,
+        "100": 6.344096000002537
+      },
+      "single_inference_ms": 0.01975799999854644,
+      "threshold_ms": 20,
+      "within_threshold": true
+    },
+    "risk": {
+      "latencies_by_batch": {
+        "1": 0.00917700000172772,
+        "10": 0.015193999997791252,
+        "100": 0.04112100000384089
+      },
+      "single_inference_ms": 0.00917700000172772,
+      "threshold_ms": 5,
+      "within_threshold": true
+    }
+  },
+  "timestamp": "2026-02-01T23:54:19.552195"
+}

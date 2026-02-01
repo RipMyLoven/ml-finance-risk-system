@@ -1,0 +1,2 @@
+{"timestamp": "2026-02-01T23:54:19.629625", "level": "INFO", "logger": "TestStructured", "message": "Model training started", "context": {"model_type": "scalp", "n_features": 20, "n_samples": 10000, "random_seed": 42}}
+{"timestamp": "2026-02-01T23:54:19.630330", "level": "INFO", "logger": "TestStructured", "message": "Hyperparameters set", "context": {"learning_rate": 0.01, "n_estimators": 100, "max_depth": 6}}

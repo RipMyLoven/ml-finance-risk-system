@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "log_tests": {
+    "basic_logging": true,
+    "structured_logging": true,
+    "parameter_logging": true,
+    "metric_logging": true,
+    "risk_logging": true,
+    "log_files_valid": true
+  },
+  "sample_logs": [
+    "2024-01-01 12:00:00 | INFO     | TestBasic            | Info message test | component=test"
+  ],
+  "warnings": [],
+  "errors": [],
+  "timestamp": "2026-02-01T23:54:19.698872"
+}

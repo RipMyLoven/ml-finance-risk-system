@@ -1,0 +1,90 @@
+{
+  "passed": true,
+  "warnings": [
+    "Ensemble logic mismatch: Mixed signals"
+  ],
+  "errors": [],
+  "signal_tests": {
+    "scenario_1": {
+      "signals": {
+        "scalp": 1,
+        "intraday": 1,
+        "swing": 0
+      },
+      "weighted_direction": 0.5599999999999999,
+      "avg_confidence": 0.64,
+      "final_signal": "BUY"
+    },
+    "scenario_2": {
+      "signals": {
+        "scalp": -1,
+        "intraday": 0,
+        "swing": -1
+      },
+      "weighted_direction": -0.455,
+      "avg_confidence": 0.575,
+      "final_signal": "SELL"
+    },
+    "scenario_3": {
+      "signals": {
+        "scalp": 1,
+        "intraday": -1,
+        "swing": 0
+      },
+      "weighted_direction": 0.15499999999999997,
+      "avg_confidence": 0.625,
+      "final_signal": "NEUTRAL"
+    }
+  },
+  "veto_tests": {
+    "risk_30": true,
+    "risk_50": true,
+    "risk_75": true,
+    "risk_90": true,
+    "risk_69": true,
+    "risk_71": true
+  },
+  "ensemble_tests": {
+    "All bullish, low risk": {
+      "weighted_signal": 0.63,
+      "risk_score": 0.3,
+      "has_conflict": false,
+      "action": "LONG",
+      "size": "FULL",
+      "passed": true
+    },
+    "All bearish, low risk": {
+      "weighted_signal": -0.63,
+      "risk_score": 0.35,
+      "has_conflict": false,
+      "action": "SHORT",
+      "size": "FULL",
+      "passed": true
+    },
+    "Bullish but high risk": {
+      "weighted_signal": 0.73,
+      "risk_score": 0.75,
+      "has_conflict": false,
+      "action": "VETO",
+      "size": "NONE",
+      "passed": true
+    },
+    "Mixed signals": {
+      "weighted_signal": 0.2,
+      "risk_score": 0.4,
+      "has_conflict": true,
+      "action": "HOLD",
+      "size": "NONE",
+      "passed": false
+    },
+    "Weak signals": {
+      "weighted_signal": 0.165,
+      "risk_score": 0.3,
+      "has_conflict": false,
+      "action": "HOLD",
+      "size": "NONE",
+      "passed": true
+    }
+  },
+  "timestamp": "2026-02-01T23:54:05.782502"
+}

@@ -1,0 +1,80 @@
+{
+  "passed": false,
+  "warnings": [],
+  "errors": [
+    "risk: Optimization failed - Found array with 0 sample(s) (shape=(0, 22)) while a minimum of 1 is required by StandardScaler."
+  ],
+  "best_params": {
+    "scalp": {
+      "n_estimators": 318,
+      "num_leaves": 27,
+      "max_depth": 3,
+      "learning_rate": 0.04628461523918855,
+      "min_child_samples": 59,
+      "subsample": 0.7096763211890255,
+      "colsample_bytree": 0.8122444712216954,
+      "reg_alpha": 0.05405462795063975,
+      "reg_lambda": 7.775683916398822e-05
+    },
+    "intraday": {
+      "n_estimators": 234,
+      "num_leaves": 69,
+      "max_depth": 3,
+      "learning_rate": 0.03141081463837457,
+      "min_child_samples": 19,
+      "subsample": 0.935631132928195,
+      "colsample_bytree": 0.7118465037896182,
+      "reg_alpha": 0.17298446063479683,
+      "reg_lambda": 6.739906652659165
+    },
+    "swing": {
+      "n_estimators": 296,
+      "num_leaves": 53,
+      "max_depth": 3,
+      "learning_rate": 0.05070641645023345,
+      "min_child_samples": 63,
+      "subsample": 0.5887663591658137,
+      "colsample_bytree": 0.9270988826876351,
+      "reg_alpha": 1.752441873734101e-05,
+      "reg_lambda": 0.004770780747185276
+    }
+  },
+  "best_metrics": {
+    "scalp": {
+      "auc": 0.5784130936741224,
+      "n_trials": 50,
+      "n_pruned": 33
+    },
+    "intraday": {
+      "auc": 0.6349302752349316,
+      "n_trials": 50,
+      "n_pruned": 29
+    },
+    "swing": {
+      "auc": 0.666665648456589,
+      "n_trials": 50,
+      "n_pruned": 36
+    }
+  },
+  "stability_checks": {
+    "scalp": {
+      "mean": 0.5776344162632747,
+      "std": 0.0004641021175923223,
+      "cv": 0.000803453022266679,
+      "stable": "True"
+    },
+    "intraday": {
+      "mean": 0.6333815958076399,
+      "std": 0.0008659023138257369,
+      "cv": 0.0013671100003859338,
+      "stable": "True"
+    },
+    "swing": {
+      "mean": 0.6652650019003339,
+      "std": 0.0008411896811024764,
+      "cv": 0.0012644430092867778,
+      "stable": "True"
+    }
+  },
+  "timestamp": "2026-02-01T23:54:05.660317"
+}

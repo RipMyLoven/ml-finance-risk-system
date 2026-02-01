@@ -1,0 +1,91 @@
+{
+  "passed": true,
+  "warnings": [
+    "risk: 100.0% NaN in target",
+    "risk: Train/test distributions identical (suspicious)",
+    "scalp: Last 12 rows should be NaN, but 0 are",
+    "intraday: Last 6 rows should be NaN, but 0 are",
+    "swing: Last 7 rows should be NaN, but 0 are",
+    "swing: Class imbalance ratio 26.2"
+  ],
+  "errors": [],
+  "target_definitions": {
+    "scalp": {
+      "horizon_bars": 12,
+      "threshold_pct": 0.3,
+      "timeframe": "5m",
+      "description": "Short-term price direction prediction"
+    },
+    "intraday": {
+      "horizon_bars": 6,
+      "threshold_pct": 1.0,
+      "timeframe": "1h",
+      "description": "Medium-term trend prediction"
+    },
+    "swing": {
+      "horizon_bars": 7,
+      "threshold_pct": 3.0,
+      "timeframe": "1d",
+      "description": "Long-term position prediction"
+    },
+    "risk": {
+      "horizon_bars": 1,
+      "target_type": "regression",
+      "description": "Volatility/risk estimation"
+    }
+  },
+  "distributions": {
+    "scalp": {
+      "distribution": {
+        "0": 19877,
+        "1": 11140,
+        "2": 21591
+      },
+      "percentages": {
+        "0": 37.8,
+        "1": 21.2,
+        "2": 41.0
+      }
+    },
+    "intraday": {
+      "distribution": {
+        "0": 8224,
+        "1": 35345,
+        "2": 9039
+      },
+      "percentages": {
+        "0": 15.6,
+        "1": 67.2,
+        "2": 17.2
+      }
+    },
+    "swing": {
+      "distribution": {
+        "0": 1861,
+        "1": 48721,
+        "2": 2026
+      },
+      "percentages": {
+        "0": 3.5,
+        "1": 92.6,
+        "2": 3.9
+      }
+    },
+    "risk": {
+      "count": 0,
+      "mean": NaN,
+      "std": NaN,
+      "min": NaN,
+      "max": NaN,
+      "median": NaN,
+      "q25": NaN,
+      "q75": NaN
+    }
+  },
+  "leakage_checks": {
+    "issues": [
+      "risk: Train/test distributions identical (suspicious)"
+    ]
+  },
+  "timestamp": "2026-02-01T23:51:32.329274"
+}

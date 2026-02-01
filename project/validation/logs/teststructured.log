@@ -1,0 +1,2 @@
+2026-02-01 23:54:19 | [32mINFO[0m | TestStructured       | Model training started | model_type=scalp | n_features=20 | n_samples=10000 | random_seed=42
+2026-02-01 23:54:19 | [32mINFO[0m | TestStructured       | Hyperparameters set | learning_rate=0.01 | n_estimators=100 | max_depth=6

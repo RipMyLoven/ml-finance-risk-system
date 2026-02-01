@@ -1,0 +1,4 @@
+2026-02-01 23:54:19 | [32mINFO[0m | TestRisk             | RISK | POSITION_SIZE_REDUCED | Reason: CVaR threshold exceeded | original_size=1000 | adjusted_size=500 | cvar_value=-0.085
+2026-02-01 23:54:19 | [32mINFO[0m | TestRisk             | RISK | TRADE_BLOCKED | Reason: Drawdown limit reached | current_dd=-0.12 | dd_limit=-0.1
+2026-02-01 23:54:19 | [32mINFO[0m | TestRisk             | RISK | LEVERAGE_ADJUSTED | Reason: Kelly criterion update | old_leverage=3.0 | new_leverage=2.0 | kelly_fraction=0.15
+2026-02-01 23:54:19 | [32mINFO[0m | TestRisk             | SIGNAL | BTCUSDT | BUY | confidence=78.00% | model=scalp | entry_price=42500.0 | stop_loss=42000.0
