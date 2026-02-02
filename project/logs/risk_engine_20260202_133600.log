@@ -1,0 +1,16 @@
+2026-02-02 13:36:00 |     INFO | Risk Engine initialized
+2026-02-02 13:36:00 |     INFO | ============================================================
+2026-02-02 13:36:00 |     INFO | PHASE 1: DATA LOADING
+2026-02-02 13:36:00 |     INFO | ============================================================
+2026-02-02 13:36:00 |     INFO | Loading data from /home/ai/NogutiAI/aiTrainCrypto/data
+2026-02-02 13:36:00 |     INFO | Discovered 102 symbols
+2026-02-02 13:36:00 |     INFO | Found 102 symbols
+2026-02-02 13:36:00 |     INFO | Loading with 48 parallel workers...
+2026-02-02 13:36:27 |     INFO | Loaded 78,886,440 rows in 27.1s
+2026-02-02 13:36:27 |     INFO | Loaded 102 symbols
+2026-02-02 13:36:27 |     INFO | Total rows: 78,886,440
+2026-02-02 13:36:27 |     INFO | ============================================================
+2026-02-02 13:36:27 |     INFO | PHASE 2: FEATURE ENGINEERING (200+ features per symbol)
+2026-02-02 13:36:27 |     INFO | ============================================================
+2026-02-02 13:36:27 |     INFO | Building 200+ features with MAXIMUM CPU/RAM usage...
+2026-02-02 13:36:27 |     INFO | Processing 102 symbols with 48 workers...

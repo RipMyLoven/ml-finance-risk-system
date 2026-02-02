@@ -12,12 +12,6 @@ cpu:
   
   # Или укажите точное количество ядер (если указано, игнорирует usage_percent)
   # exact_cores: 36
-  
-  # Лимит нагрузки на каждое ядро (0.1 - 1.0)
-  # 0.80 = 80% нагрузки на ядро, помогает избежать перегрева
-  # Методы: 'cgroups' (рекомендуется), 'cpulimit', 'nice'
-  load_limit_per_core: 0.80
-  limit_method: cgroups
 
 # --- НАСТРОЙКИ RAM ---
 ram:
@@ -93,9 +87,10 @@ risk:
 
 # --- ПУТИ ---
 paths:
-  data: /home/ai/NogutiAI/aiTrainCrypto/data
-  models: /home/ai/NogutiAI/aiTrainCrypto/models
-  cache: /home/ai/NogutiAI/aiTrainCrypto/.cache
+  data: /home/ai/NogutiAI/aiTrainCrypto/project/data
+  models: /home/ai/NogutiAI/aiTrainCrypto/project/models
+  logs: /home/ai/NogutiAI/aiTrainCrypto/project/logs
+  cache: /home/ai/NogutiAI/aiTrainCrypto/project/.cache
 
 # --- ПРОЧЕЕ ---
 misc:

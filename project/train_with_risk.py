@@ -59,8 +59,6 @@ CONFIG = load_config()
 CPU_CONFIG = CONFIG.get('cpu', {})
 CPU_USAGE_PCT = CPU_CONFIG.get('usage_percent', 1.0)
 EXACT_CORES = CPU_CONFIG.get('exact_cores', None)
-CPU_LOAD_LIMIT = CPU_CONFIG.get('load_limit_per_core', None)  # e.g., 0.80 for 80%
-CPU_LIMIT_METHOD = CPU_CONFIG.get('limit_method', 'cgroups')  # 'cgroups', 'cpulimit', 'nice'
 
 if EXACT_CORES:
     N_CORES_TO_USE = int(EXACT_CORES)
@@ -124,8 +122,6 @@ class SystemConfig:
     n_cpu: int = field(default_factory=lambda: N_CORES_TO_USE)
     n_cpu_total: int = field(default_factory=lambda: N_CORES_TOTAL)
     total_ram_gb: float = field(default_factory=lambda: os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024**3))
-    cpu_load_limit: float = field(default_factory=lambda: CPU_LOAD_LIMIT)  # 0.80 = 80% per core
-    cpu_limit_method: str = field(default_factory=lambda: CPU_LIMIT_METHOD)  # 'cgroups', 'cpulimit', 'nice'
     
     # Parallelization settings
     n_jobs: int = -1  # Will be set to n_cpu in __post_init__
@@ -149,9 +145,9 @@ class SystemConfig:
     max_cached_hist_node: int = 65536
     
     # Data paths from config
-    data_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('data', '/home/ai/NogutiAI/aiTrainCrypto/data'))
-    model_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('models', '/home/ai/NogutiAI/aiTrainCrypto/models'))
-    cache_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('cache', '/home/ai/NogutiAI/aiTrainCrypto/.cache'))
+    data_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('data', '/home/ai/NogutiAI/aiTrainCrypto/project/data'))
+    model_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('models', '/home/ai/NogutiAI/aiTrainCrypto/project/models'))
+    cache_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('cache', '/home/ai/NogutiAI/aiTrainCrypto/project/.cache'))
     
     # Training settings from config
     random_seed: int = field(default_factory=lambda: CONFIG.get('misc', {}).get('random_seed', 42))
@@ -300,7 +296,7 @@ class RiskLogger:
     """Comprehensive logging for audit trails."""
     
     def __init__(self, log_path: str = None):
-        self.log_path = log_path or '/home/ai/NogutiAI/aiTrainCrypto/logs'
+        self.log_path = log_path or CONFIG.get('paths', {}).get('logs', '/home/ai/NogutiAI/aiTrainCrypto/project/logs')
         os.makedirs(self.log_path, exist_ok=True)
         
         self.session_id = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -2197,8 +2193,6 @@ class ProductionTrainingPipeline:
         print("=" * 80)
         print(f"  Config: {config_status}")
         print(f"  CPU Cores: {self.config.n_cpu}/{self.config.n_cpu_total} ({self.config.cpu_usage_pct*100:.0f}%)")
-        if self.config.cpu_load_limit:
-            print(f"  CPU Load Limit: {self.config.cpu_load_limit*100:.0f}% per core (via cpulimit)")
         print(f"  RAM: {self.config.total_ram_gb:.1f} GB (using {self.config.ram_usage_pct*100:.0f}%)")
         print(f"  Workers: {self.config.n_jobs}")
         print(f"  LightGBM: max_bin={self.config.max_bin}, leaves={self.config.num_leaves}, lr={self.config.learning_rate}")
@@ -2615,10 +2609,6 @@ def main():
                        help='CPU usage percent (0.1-1.0), overrides config.yaml')
     parser.add_argument('--cores', type=int, default=None,
                        help='Exact number of CPU cores to use, overrides config.yaml')
-    parser.add_argument('--no-cpulimit', action='store_true',
-                       help='Disable cpulimit even if set in config')
-    parser.add_argument('--_cpulimit_child', action='store_true',
-                       help=argparse.SUPPRESS)  # Internal flag
     
     args = parser.parse_args()
     
@@ -2643,57 +2633,6 @@ def main():
     if args.fast:
         # Reduce trials for fast testing
         config.optuna_n_trials = min(10, config.optuna_n_trials)
-    
-    # Apply CPU limit if configured
-    if config.cpu_load_limit and not args.no_cpulimit and not args._cpulimit_child:
-        import subprocess
-        import shutil
-        
-        method = config.cpu_limit_method
-        limit_pct = int(config.cpu_load_limit * 100)
-        
-        if method == 'cgroups':
-            # Use systemd-run with CPUQuota (most reliable for multiprocessing)
-            # CPUQuota: 80% per core * 48 cores = 3840%
-            total_quota = int(config.n_cpu * config.cpu_load_limit * 100)
-            
-            print(f"[cgroups] Restarting with CPU quota: {total_quota}% ({config.n_cpu} cores × {limit_pct}%)")
-            
-            # Build command with systemd-run
-            new_args = sys.argv + ['--_cpulimit_child']
-            cmd = [
-                'systemd-run', '--user', '--scope',
-                f'--property=CPUQuota={total_quota}%',
-                sys.executable
-            ] + new_args
-            
-            try:
-                os.execvp('systemd-run', cmd)
-            except Exception as e:
-                print(f"[WARNING] systemd-run failed: {e}")
-                print("[WARNING] Trying cpulimit fallback...")
-                method = 'cpulimit'
-        
-        if method == 'cpulimit':
-            cpulimit_path = shutil.which('cpulimit')
-            if cpulimit_path:
-                total_limit = int(config.n_cpu * config.cpu_load_limit * 100)
-                
-                print(f"[cpulimit] Restarting with CPU limit: {total_limit}% ({config.n_cpu} cores × {limit_pct}%)")
-                
-                new_args = sys.argv + ['--_cpulimit_child']
-                cmd = [cpulimit_path, '-i', '-l', str(total_limit), '--', sys.executable] + new_args
-                
-                os.execvp(cpulimit_path, cmd)
-            else:
-                print("[WARNING] cpulimit not found. Install: sudo dnf install cpulimit")
-        
-        if method == 'nice':
-            # Use nice for lower priority (doesn't limit, but reduces contention)
-            print(f"[nice] Running with nice level 10 (reduced priority)")
-            new_args = sys.argv + ['--_cpulimit_child']
-            cmd = ['nice', '-n', '10', sys.executable] + new_args
-            os.execvp('nice', cmd)
         
     # Run pipeline
     pipeline = ProductionTrainingPipeline(config)
