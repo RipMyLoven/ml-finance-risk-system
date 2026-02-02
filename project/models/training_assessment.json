@@ -1,0 +1,73 @@
+{
+  "timestamp": "2026-02-02T11:07:29.801235",
+  "models_trained": [
+    "swing"
+  ],
+  "metrics": {
+    "swing": {
+      "model_type": "swing",
+      "cv_score": 0.9507458792304331,
+      "cv_score_std": 0.033926743372820874,
+      "best_iteration": 444,
+      "n_features": 81,
+      "n_samples": 187331,
+      "params": {
+        "objective": "multiclass",
+        "num_class": 3,
+        "metric": "multi_logloss",
+        "boosting_type": "gbdt",
+        "num_leaves": 31,
+        "learning_rate": 0.05,
+        "feature_fraction": 0.8,
+        "bagging_fraction": 0.8,
+        "bagging_freq": 5,
+        "verbose": -1,
+        "n_jobs": 48,
+        "seed": 42
+      },
+      "train_time": 44.88639188399975,
+      "throughput": 4173.4475001715655,
+      "trained_at": "2026-02-02T11:07:27.824287",
+      "cv_accuracy": 0.5501617501040965,
+      "cv_accuracy_std": 0.031110413632748073
+    }
+  },
+  "cvar_config": {
+    "confidence_level": 0.95,
+    "default_window": 252,
+    "min_samples": 30,
+    "stress_multiplier": 1.5,
+    "block_threshold": 0.08,
+    "model_limits": {
+      "scalp": 0.05,
+      "intraday": 0.07,
+      "swing": 0.1,
+      "portfolio": 0.08
+    }
+  },
+  "kelly_config": {
+    "mode": "quarter",
+    "max_kelly_fraction": 0.25,
+    "max_leverage": 5.0,
+    "max_position_pct": 0.1,
+    "min_win_rate": 0.35,
+    "base_volatility": 0.02,
+    "model_leverage_limits": {
+      "scalp": 10.0,
+      "intraday": 5.0,
+      "swing": 3.0
+    }
+  },
+  "drawdown_config": {
+    "level_1": 0.05,
+    "level_2": 0.1,
+    "level_3": 0.15,
+    "level_4": 0.2,
+    "emergency": 0.25,
+    "scalp_disable": 0.08,
+    "intraday_disable": 0.12,
+    "swing_disable": 0.18,
+    "recovery_to_reduced": 0.5,
+    "recovery_to_full": 0.8
+  }
+}

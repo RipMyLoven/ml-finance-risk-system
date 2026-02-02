@@ -9,7 +9,11 @@ Intraday features:
 - BTC correlation
 """
 
+import warnings
+warnings.filterwarnings('ignore')
+
 import pandas as pd
+pd.options.mode.chained_assignment = None
 import numpy as np
 from typing import Tuple, List
 from sklearn.preprocessing import StandardScaler
@@ -444,7 +448,6 @@ def build_intraday_features(
     Построить все Intraday фичи
     """
     initial_len = len(df)
-    print(f"Building Intraday features... (initial rows: {initial_len})")
     
     df = add_trend_features(df)
     df = add_vwap_features(df)
@@ -519,8 +522,6 @@ def build_intraday_features(
         df[feature_names] = df[feature_names].replace([np.inf, -np.inf], 0).fillna(0)
     
     final_len = len(df)
-    retained_pct = (final_len / initial_len * 100) if initial_len > 0 else 0
-    print(f"Intraday features: {len(feature_names)}, samples: {final_len} ({retained_pct:.1f}% retained)")
     
     return df, feature_names
     

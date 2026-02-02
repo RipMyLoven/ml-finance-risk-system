@@ -8,7 +8,11 @@ Swing features:
 - dominance BTC
 """
 
+import warnings
+warnings.filterwarnings('ignore')
+
 import pandas as pd
+pd.options.mode.chained_assignment = None
 import numpy as np
 from typing import Tuple, List
 from sklearn.preprocessing import StandardScaler
@@ -163,7 +167,7 @@ def add_btc_dominance_features(df: pd.DataFrame, btc_dominance: pd.Series = None
             right_index=True,
             how='left'
         )
-        df['btc_dominance'] = df['btc_dominance'].fillna(method='ffill')
+        df['btc_dominance'] = df['btc_dominance'].ffill()
         
         # Dominance change
         df['dominance_change_5d'] = df['btc_dominance'].pct_change(5)
@@ -321,7 +325,7 @@ def add_derivatives_features_swing(df: pd.DataFrame) -> pd.DataFrame:
     # Open Interest Features (long-term)
     # =========================
     if 'sum_open_interest' in df.columns:
-        oi = df['sum_open_interest'].fillna(method='ffill')
+        oi = df['sum_open_interest'].ffill()
         
         # OI trend
         df['oi_ma_7d'] = oi.rolling(min(7, min_w)).mean()
@@ -452,7 +456,6 @@ def build_swing_features(
     Построить все Swing фичи
     """
     initial_len = len(df)
-    print(f"Building Swing features... (initial rows: {initial_len})")
     
     df = add_ma_features(df)
     df = add_market_regime(df)
@@ -520,8 +523,6 @@ def build_swing_features(
         df[feature_names] = df[feature_names].replace([np.inf, -np.inf], 0).fillna(0)
     
     final_len = len(df)
-    retained_pct = (final_len / initial_len * 100) if initial_len > 0 else 0
-    print(f"Swing features: {len(feature_names)}, samples: {final_len} ({retained_pct:.1f}% retained)")
     
     return df, feature_names
     

@@ -45,8 +45,6 @@ def build_advanced_risk_features(
         - Tail risk: Extreme event probability
         - Signal degradation: Model reliability
     """
-    print("Building Advanced Risk Features...")
-    
     feature_cols = []
     
     # =======================================================================
@@ -121,8 +119,6 @@ def build_advanced_risk_features(
     
     # Filter only feature columns that exist
     feature_cols = [c for c in feature_cols if c in df.columns]
-    
-    print(f"  Total risk features: {len(feature_cols)}")
     
     return df, feature_cols
 

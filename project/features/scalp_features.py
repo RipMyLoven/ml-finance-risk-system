@@ -9,7 +9,11 @@ Scalp features:
 - orderbook imbalance
 """
 
+import warnings
+warnings.filterwarnings('ignore')
+
 import pandas as pd
+pd.options.mode.chained_assignment = None
 import numpy as np
 from typing import Tuple, List
 from sklearn.preprocessing import StandardScaler
@@ -301,7 +305,6 @@ def build_scalp_features(
         feature_names: список названий фичей
     """
     initial_len = len(df)
-    print(f"Building Scalp features... (initial rows: {initial_len})")
     
     # Добавляем все фичи
     df = add_log_returns(df)
@@ -370,8 +373,6 @@ def build_scalp_features(
         df[feature_names] = df[feature_names].replace([np.inf, -np.inf], 0).fillna(0)
     
     final_len = len(df)
-    retained_pct = (final_len / initial_len * 100) if initial_len > 0 else 0
-    print(f"Scalp features: {len(feature_names)}, samples: {final_len} ({retained_pct:.1f}% retained)")
     
     return df, feature_names
 
