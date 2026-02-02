@@ -16,7 +16,10 @@ cpu:
 # --- НАСТРОЙКИ RAM ---
 ram:
   # Процент используемой оперативной памяти (0.1 - 0.9)
-  usage_percent: 0.90
+  usage_percent: 0.92
+  
+  # Жёсткий лимит RAM в GB (если указано, ограничивает максимум)
+  max_gb: 300
 
 # --- НАСТРОЙКИ LightGBM ---
 lightgbm:
@@ -87,7 +90,7 @@ risk:
 
 # --- ПУТИ ---
 paths:
-  data: /home/ai/NogutiAI/aiTrainCrypto/project/data
+  data: /home/ai/NogutiAI/aiTrainCrypto/data
   models: /home/ai/NogutiAI/aiTrainCrypto/project/models
   logs: /home/ai/NogutiAI/aiTrainCrypto/project/logs
   cache: /home/ai/NogutiAI/aiTrainCrypto/project/.cache

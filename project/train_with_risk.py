@@ -121,7 +121,10 @@ class SystemConfig:
     # CPU settings from config
     n_cpu: int = field(default_factory=lambda: N_CORES_TO_USE)
     n_cpu_total: int = field(default_factory=lambda: N_CORES_TOTAL)
-    total_ram_gb: float = field(default_factory=lambda: os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024**3))
+    total_ram_gb: float = field(default_factory=lambda: min(
+        os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024**3),
+        CONFIG.get('ram', {}).get('max_gb', 9999)  # Hard limit from config
+    ))
     
     # Parallelization settings
     n_jobs: int = -1  # Will be set to n_cpu in __post_init__
@@ -130,6 +133,7 @@ class SystemConfig:
     # Resource usage from config
     cpu_usage_pct: float = field(default_factory=lambda: CPU_USAGE_PCT)
     ram_usage_pct: float = field(default_factory=lambda: CONFIG.get('ram', {}).get('usage_percent', 0.70))
+    ram_max_gb: float = field(default_factory=lambda: CONFIG.get('ram', {}).get('max_gb', None))
     
     # LightGBM settings from config
     max_bin: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('max_bin', 512))
@@ -2193,7 +2197,9 @@ class ProductionTrainingPipeline:
         print("=" * 80)
         print(f"  Config: {config_status}")
         print(f"  CPU Cores: {self.config.n_cpu}/{self.config.n_cpu_total} ({self.config.cpu_usage_pct*100:.0f}%)")
-        print(f"  RAM: {self.config.total_ram_gb:.1f} GB (using {self.config.ram_usage_pct*100:.0f}%)")
+        ram_limit_str = f", max={self.config.ram_max_gb:.0f}GB" if self.config.ram_max_gb else ""
+        usable_ram = self.config.total_ram_gb * self.config.ram_usage_pct
+        print(f"  RAM: {self.config.total_ram_gb:.1f} GB × {self.config.ram_usage_pct*100:.0f}% = {usable_ram:.1f} GB{ram_limit_str}")
         print(f"  Workers: {self.config.n_jobs}")
         print(f"  LightGBM: max_bin={self.config.max_bin}, leaves={self.config.num_leaves}, lr={self.config.learning_rate}")
         print(f"  Optuna: {'Yes' if OPTUNA_AVAILABLE else 'No'} ({self.config.optuna_n_trials} trials) | ONNX: {'Yes' if ONNX_AVAILABLE else 'No'}")
@@ -2230,10 +2236,21 @@ class ProductionTrainingPipeline:
             n_features = len(self.features[sample_symbol][sample_tf].columns)
             self.logger.info(f"Generated {n_features} features per timeframe")
         
+        # FREE MEMORY: Clear raw klines data since we have features now
+        self.logger.info("Clearing raw data to free memory...")
+        self.data_loader.klines.clear()
+        self.data_loader.funding_rates.clear()
+        self.data_loader.open_interest.clear()
+        import gc
+        gc.collect()
+        self.logger.info("Memory freed.")
+        
         return self.features
     
     def _get_training_data_with_features(self, model_type: ModelType) -> Tuple[pd.DataFrame, pd.Series]:
         """Get training data with ALL generated features."""
+        import gc
+        
         timeframe_map = {
             ModelType.SCALP: '5m',
             ModelType.INTRADAY: '1h',
@@ -2242,6 +2259,7 @@ class ProductionTrainingPipeline:
         primary_tf = timeframe_map.get(model_type, '1h')
         
         all_data = []
+        symbols_processed = []
         
         for symbol in self.data_loader.symbols:
             if symbol not in self.features:
@@ -2252,12 +2270,24 @@ class ProductionTrainingPipeline:
             df = self.features[symbol][primary_tf].copy()
             df['symbol'] = symbol
             all_data.append(df)
+            symbols_processed.append(symbol)
             
         if not all_data:
             return pd.DataFrame(), pd.Series()
+        
+        # FREE: Clear features for this timeframe to save memory
+        self.logger.info(f"  Clearing {primary_tf} features from {len(symbols_processed)} symbols...")
+        for symbol in symbols_processed:
+            if symbol in self.features and primary_tf in self.features[symbol]:
+                del self.features[symbol][primary_tf]
+        gc.collect()
             
         self.logger.info(f"  Concatenating data from {len(all_data)} symbols...")
         combined = pd.concat(all_data, ignore_index=True)
+        
+        # Free all_data list
+        del all_data
+        gc.collect()
         
         # Create target
         combined['future_return'] = combined.groupby('symbol')['close'].pct_change(1).shift(-1)
@@ -2274,8 +2304,12 @@ class ProductionTrainingPipeline:
         X = combined[feature_cols]
         y = combined['target']
         
-        # Convert to float64 and handle NaN
-        X = X.select_dtypes(include=[np.number]).astype(np.float64)
+        # Free combined dataframe
+        del combined
+        gc.collect()
+        
+        # Convert to float32 (saves 50% RAM compared to float64)
+        X = X.select_dtypes(include=[np.number]).astype(np.float32)
         X = X.replace([np.inf, -np.inf], np.nan)
         
         # Fill NaN with column medians
@@ -2333,6 +2367,12 @@ class ProductionTrainingPipeline:
             
             self.models[model_type] = model
             results[model_type.value] = {'auc': auc, 'samples': len(X)}
+            
+            # FREE MEMORY after each model
+            del X, y, X_train, X_test, y_train, y_test, X_train_scaled, y_train_arr, X_test_scaled
+            import gc
+            gc.collect()
+            self.logger.info(f"  Memory freed after {model_type.value} training.")
             
         self.training_results['trading_models'] = results
         return results
