@@ -1,0 +1,104 @@
+# ============================================================================
+# КОНФИГУРАЦИЯ СИСТЕМЫ ТРЕНИРОВКИ
+# ============================================================================
+# Измените параметры ниже и перезапустите скрипт
+# ============================================================================
+
+# --- НАСТРОЙКИ CPU ---
+cpu:
+  # Процент используемых ядер (0.1 - 1.0)
+  # 1.0 = все 48 ядер, 0.75 = 36 ядер, 0.5 = 24 ядра
+  usage_percent: 1.0
+  
+  # Или укажите точное количество ядер (если указано, игнорирует usage_percent)
+  # exact_cores: 36
+  
+  # Лимит нагрузки на каждое ядро (0.1 - 1.0)
+  # 0.80 = 80% нагрузки на ядро, помогает избежать перегрева
+  # Методы: 'cgroups' (рекомендуется), 'cpulimit', 'nice'
+  load_limit_per_core: 0.80
+  limit_method: cgroups
+
+# --- НАСТРОЙКИ RAM ---
+ram:
+  # Процент используемой оперативной памяти (0.1 - 0.9)
+  usage_percent: 0.90
+
+# --- НАСТРОЙКИ LightGBM ---
+lightgbm:
+  # Количество bins для гистограмм (больше = точнее, но больше RAM)
+  # Рекомендуется: 255-512
+  max_bin: 512
+  
+  # Количество листьев в дереве (больше = сложнее модель)
+  # Рекомендуется: 31-255
+  num_leaves: 255
+  
+  # Максимальная глубина дерева (-1 = без ограничений)
+  max_depth: 15
+  
+  # Минимум данных в листе
+  min_data_in_leaf: 10
+  
+  # Learning rate
+  learning_rate: 0.03
+  
+  # Количество итераций
+  num_boost_round: 2000
+  
+  # Early stopping
+  early_stopping_rounds: 100
+
+# --- НАСТРОЙКИ OPTUNA ---
+optuna:
+  # Количество trials для оптимизации
+  n_trials: 50
+  
+  # Таймаут на trial в секундах (null = без ограничений)
+  timeout_per_trial: null
+
+# --- НАСТРОЙКИ FEATURE ENGINEERING ---
+features:
+  # Генерировать расширенный набор features (200+)
+  extended: true
+  
+  # Периоды для скользящих средних
+  sma_periods: [3, 5, 7, 10, 14, 20, 30, 50, 100, 200]
+  
+  # Периоды для RSI
+  rsi_periods: [5, 7, 9, 14, 21, 28]
+
+# --- НАСТРОЙКИ РИСК-МЕНЕДЖМЕНТА ---
+risk:
+  # Максимальное плечо
+  max_leverage: 10.0
+  
+  # Максимальный размер позиции (% от портфеля)
+  max_position_pct: 0.25
+  
+  # Пороги drawdown
+  drawdown_warning: 0.05
+  drawdown_critical: 0.10
+  drawdown_emergency: 0.15
+  
+  # CVaR настройки
+  cvar_confidence: 0.95
+  cvar_window: 252
+  cvar_max_threshold: 0.03
+  
+  # Kelly Criterion
+  kelly_fraction: 0.25
+  kelly_min: 0.01
+  kelly_max: 0.50
+
+# --- ПУТИ ---
+paths:
+  data: /home/ai/NogutiAI/aiTrainCrypto/data
+  models: /home/ai/NogutiAI/aiTrainCrypto/models
+  cache: /home/ai/NogutiAI/aiTrainCrypto/.cache
+
+# --- ПРОЧЕЕ ---
+misc:
+  random_seed: 42
+  test_size: 0.20
+  val_size: 0.10

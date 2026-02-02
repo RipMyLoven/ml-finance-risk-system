@@ -9,10 +9,10 @@
   - Implement centralized Risk Engine with CVaR, Kelly, and Drawdown controls
   - Multi-objective Optuna optimization
   - ONNX export for production deployment
-  - Saturate 100% CPU and RAM resources
+  - Configurable CPU/RAM utilization via config.yaml
   
   Author: AI Trading Systems
-  Version: 1.0.0
+  Version: 1.1.0
   
 ================================================================================
 """
@@ -28,6 +28,7 @@ import logging
 import warnings
 import hashlib
 import pickle
+import yaml
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any, Union, Callable
@@ -39,6 +40,47 @@ import multiprocessing as mp
 # Suppress warnings for clean output
 warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+# ==============================================================================
+# LOAD CONFIG FIRST
+# ==============================================================================
+
+def load_config() -> dict:
+    """Load configuration from config.yaml."""
+    config_path = Path(__file__).parent / 'config.yaml'
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    return {}
+
+CONFIG = load_config()
+
+# Get CPU settings from config
+CPU_CONFIG = CONFIG.get('cpu', {})
+CPU_USAGE_PCT = CPU_CONFIG.get('usage_percent', 1.0)
+EXACT_CORES = CPU_CONFIG.get('exact_cores', None)
+CPU_LOAD_LIMIT = CPU_CONFIG.get('load_limit_per_core', None)  # e.g., 0.80 for 80%
+CPU_LIMIT_METHOD = CPU_CONFIG.get('limit_method', 'cgroups')  # 'cgroups', 'cpulimit', 'nice'
+
+if EXACT_CORES:
+    N_CORES_TO_USE = int(EXACT_CORES)
+else:
+    N_CORES_TO_USE = max(1, int(mp.cpu_count() * CPU_USAGE_PCT))
+
+N_CORES_TOTAL = mp.cpu_count()
+
+# Force parallelization across libraries with configured cores
+os.environ['OMP_NUM_THREADS'] = str(N_CORES_TO_USE)
+os.environ['MKL_NUM_THREADS'] = str(N_CORES_TO_USE)
+os.environ['OPENBLAS_NUM_THREADS'] = str(N_CORES_TO_USE)
+os.environ['VECLIB_MAXIMUM_THREADS'] = str(N_CORES_TO_USE)
+os.environ['NUMEXPR_NUM_THREADS'] = str(N_CORES_TO_USE)
+os.environ['JOBLIB_TEMP_FOLDER'] = '/tmp/joblib'
+os.environ['LOKY_MAX_CPU_COUNT'] = str(N_CORES_TO_USE)
+# Memory-mapped arrays for efficiency
+os.environ['JOBLIB_START_METHOD'] = 'forkserver'
+# LightGBM specific optimizations
+os.environ['LGB_NUM_THREADS'] = str(N_CORES_TO_USE)
 
 import numpy as np
 import pandas as pd
@@ -76,42 +118,65 @@ from joblib import Parallel, delayed, Memory
 
 @dataclass
 class SystemConfig:
-    """Global system configuration with automatic resource detection."""
+    """Global system configuration loaded from config.yaml."""
     
-    # Auto-detected resources
-    n_cpu: int = field(default_factory=lambda: mp.cpu_count())
+    # CPU settings from config
+    n_cpu: int = field(default_factory=lambda: N_CORES_TO_USE)
+    n_cpu_total: int = field(default_factory=lambda: N_CORES_TOTAL)
     total_ram_gb: float = field(default_factory=lambda: os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024**3))
+    cpu_load_limit: float = field(default_factory=lambda: CPU_LOAD_LIMIT)  # 0.80 = 80% per core
+    cpu_limit_method: str = field(default_factory=lambda: CPU_LIMIT_METHOD)  # 'cgroups', 'cpulimit', 'nice'
     
     # Parallelization settings
-    n_jobs: int = -1  # Use all cores
+    n_jobs: int = -1  # Will be set to n_cpu in __post_init__
     parallel_backend: str = 'loky'
     
-    # Data paths
-    data_path: str = '/home/ai/NogutiAI/aiTrainCrypto/data'
-    model_path: str = '/home/ai/NogutiAI/aiTrainCrypto/models'
-    cache_path: str = '/home/ai/NogutiAI/aiTrainCrypto/.cache'
+    # Resource usage from config
+    cpu_usage_pct: float = field(default_factory=lambda: CPU_USAGE_PCT)
+    ram_usage_pct: float = field(default_factory=lambda: CONFIG.get('ram', {}).get('usage_percent', 0.70))
     
-    # Training settings
-    random_seed: int = 42
-    test_size: float = 0.2
-    val_size: float = 0.1
+    # LightGBM settings from config
+    max_bin: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('max_bin', 512))
+    num_leaves: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('num_leaves', 255))
+    max_depth: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('max_depth', 15))
+    min_data_in_leaf: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('min_data_in_leaf', 10))
+    learning_rate: float = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('learning_rate', 0.03))
+    num_boost_round: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('num_boost_round', 2000))
+    early_stopping_rounds: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('early_stopping_rounds', 100))
+    feature_fraction_bynode: float = 0.9
+    histogram_pool_size: int = -1
+    bin_construct_sample_cnt: int = 5000000
+    max_cached_hist_node: int = 65536
     
-    # Risk thresholds (will be optimized by Optuna)
-    max_leverage: float = 10.0
-    max_position_pct: float = 0.25
-    max_drawdown_warning: float = 0.05
-    max_drawdown_critical: float = 0.10
-    max_drawdown_emergency: float = 0.15
+    # Data paths from config
+    data_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('data', '/home/ai/NogutiAI/aiTrainCrypto/data'))
+    model_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('models', '/home/ai/NogutiAI/aiTrainCrypto/models'))
+    cache_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('cache', '/home/ai/NogutiAI/aiTrainCrypto/.cache'))
     
-    # CVaR settings
-    cvar_confidence: float = 0.95
-    cvar_window: int = 252
-    cvar_max_threshold: float = 0.03
+    # Training settings from config
+    random_seed: int = field(default_factory=lambda: CONFIG.get('misc', {}).get('random_seed', 42))
+    test_size: float = field(default_factory=lambda: CONFIG.get('misc', {}).get('test_size', 0.20))
+    val_size: float = field(default_factory=lambda: CONFIG.get('misc', {}).get('val_size', 0.10))
     
-    # Kelly settings
-    kelly_fraction: float = 0.25
-    kelly_min: float = 0.01
-    kelly_max: float = 0.5
+    # Risk thresholds from config
+    max_leverage: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('max_leverage', 10.0))
+    max_position_pct: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('max_position_pct', 0.25))
+    max_drawdown_warning: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('drawdown_warning', 0.05))
+    max_drawdown_critical: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('drawdown_critical', 0.10))
+    max_drawdown_emergency: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('drawdown_emergency', 0.15))
+    
+    # CVaR settings from config
+    cvar_confidence: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('cvar_confidence', 0.95))
+    cvar_window: int = field(default_factory=lambda: CONFIG.get('risk', {}).get('cvar_window', 252))
+    cvar_max_threshold: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('cvar_max_threshold', 0.03))
+    
+    # Kelly settings from config
+    kelly_fraction: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('kelly_fraction', 0.25))
+    kelly_min: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('kelly_min', 0.01))
+    kelly_max: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('kelly_max', 0.50))
+    
+    # Optuna settings from config
+    optuna_n_trials: int = field(default_factory=lambda: CONFIG.get('optuna', {}).get('n_trials', 50))
     
     def __post_init__(self):
         self.n_jobs = self.n_cpu if self.n_jobs == -1 else self.n_jobs
@@ -1030,22 +1095,54 @@ class OptimizedDataLoader:
         data_path = Path(self.config.data_path)
         symbols = set()
         
-        for f in data_path.glob('klines_*.csv'):
-            match = re.search(r'klines_usdt_m_(\w+)_(\w+)\.csv', f.name)
-            if match:
-                symbols.add(match.group(1))
+        # Pattern: klines_usdt_m_{SYMBOL}_{TIMEFRAME}.csv
+        for f in data_path.glob('klines_usdt_m_*_1h.csv'):
+            # Extract symbol from filename like klines_usdt_m_BTCUSDT_1h.csv
+            name = f.stem  # klines_usdt_m_BTCUSDT_1h
+            parts = name.split('_')
+            if len(parts) >= 4:
+                # Symbol is between 'usdt_m_' and '_1h'
+                symbol = '_'.join(parts[3:-1]) if len(parts) > 4 else parts[3]
+                symbols.add(symbol)
                 
         self.symbols = sorted(list(symbols))
+        self.logger.info(f"Discovered {len(self.symbols)} symbols")
         return self.symbols
     
     def _load_single_file(self, filepath: Path) -> Optional[pd.DataFrame]:
-        """Load single CSV file with optimized settings."""
+        """Load single CSV file with MAXIMUM PERFORMANCE settings."""
         try:
-            df = pd.read_csv(
-                filepath,
-                parse_dates=['open_time'] if 'klines' in filepath.name else None,
-                low_memory=False
-            )
+            # Use pyarrow for much faster CSV reading if available
+            try:
+                import pyarrow.csv as pa_csv
+                table = pa_csv.read_csv(
+                    filepath,
+                    read_options=pa_csv.ReadOptions(
+                        use_threads=True,
+                        block_size=256 * 1024 * 1024  # 256MB blocks
+                    ),
+                    parse_options=pa_csv.ParseOptions(
+                        delimiter=','
+                    ),
+                    convert_options=pa_csv.ConvertOptions(
+                        include_missing_columns=True
+                    )
+                )
+                df = table.to_pandas()
+            except ImportError:
+                # Fallback to pandas with optimized settings
+                df = pd.read_csv(
+                    filepath,
+                    low_memory=False,
+                    engine='c',  # Use C parser
+                    memory_map=True  # Memory map file for speed
+                )
+            
+            # Convert timestamp if present
+            if 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            elif 'open_time' in df.columns:
+                df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
             return df
         except Exception as e:
             return None
@@ -1066,7 +1163,7 @@ class OptimizedDataLoader:
             filepath = data_path / f'klines_usdt_m_{symbol}_{tf}.csv'
             if filepath.exists():
                 df = self._load_single_file(filepath)
-                if df is not None:
+                if df is not None and len(df) > 0:
                     result['klines'][tf] = df
                     
         # Load funding rate
@@ -1074,34 +1171,35 @@ class OptimizedDataLoader:
         if fr_path.exists():
             result['funding_rate'] = self._load_single_file(fr_path)
             
-        # Load open interest
-        oi_path = data_path / f'open_interest_usdt_m_{symbol}.csv'
+        # Load open interest  
+        oi_path = data_path / f'open_interest_usdt_m_{symbol}_5m.csv'
         if oi_path.exists():
             result['open_interest'] = self._load_single_file(oi_path)
             
         return result
     
     def load_all_data(self) -> Dict:
-        """Load all data with full parallelization."""
+        """Load all data with MAXIMUM parallelization - uses multiprocessing.Pool."""
         self.logger.info(f"Loading data from {self.config.data_path}")
         
         # Discover symbols
         symbols = self.discover_symbols()
         self.logger.info(f"Found {len(symbols)} symbols")
         
-        # Parallel load
         start_time = time.time()
         
-        results = Parallel(
-            n_jobs=self.config.n_jobs,
-            backend=self.config.parallel_backend,
-            verbose=0
-        )(
-            delayed(self._load_symbol_data)(symbol)
-            for symbol in symbols
-        )
+        # Use multiprocessing Pool directly for MAXIMUM parallelism
+        from multiprocessing import Pool, get_context
         
-        # Organize results
+        # Use fork for faster startup
+        ctx = get_context('fork')
+        
+        self.logger.info(f"Loading with {self.config.n_cpu} parallel workers...")
+        
+        with ctx.Pool(processes=self.config.n_cpu) as pool:
+            results = pool.map(self._load_symbol_data, symbols, chunksize=1)
+        
+        # Organize results and force RAM allocation
         total_rows = 0
         for result in results:
             symbol = result['symbol']
@@ -1130,7 +1228,7 @@ class OptimizedDataLoader:
         }
     
     def get_training_data(self, model_type: ModelType) -> Tuple[pd.DataFrame, pd.Series]:
-        """Get prepared training data for specific model type."""
+        """Get prepared training data for specific model type with MAXIMUM performance."""
         # Determine primary timeframe
         timeframe_map = {
             ModelType.SCALP: '5m',
@@ -1156,19 +1254,24 @@ class OptimizedDataLoader:
             
         combined = pd.concat(all_data, ignore_index=True)
         
-        # Create target (future return direction)
+        # Create target (future return direction) - FIXED NA handling
         combined['future_return'] = combined.groupby('symbol')['close'].pct_change(1).shift(-1)
-        combined['target'] = (combined['future_return'] > 0).astype(int)
         
-        # Drop NaN
-        combined = combined.dropna()
+        # Drop rows with NaN future_return FIRST, then create target
+        combined = combined.dropna(subset=['future_return'])
+        combined['target'] = (combined['future_return'] > 0).astype(np.int32)
         
-        # Features
+        # Features - select only numeric columns
         feature_cols = [c for c in combined.columns 
-                       if c not in ['symbol', 'open_time', 'future_return', 'target']]
+                       if c not in ['symbol', 'open_time', 'timestamp', 'future_return', 'target', 'interval', 'market_type']]
         
         X = combined[feature_cols]
         y = combined['target']
+        
+        # Convert to numpy-friendly dtypes (avoid nullable int which causes issues)
+        X = X.astype(np.float64)
+        X = X.replace([np.inf, -np.inf], np.nan)
+        X = X.fillna(X.median())
         
         return X, y
 
@@ -1185,46 +1288,215 @@ class ParallelFeatureEngine:
         self.logger = logger
         
     def compute_technical_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Compute technical indicators for a single DataFrame."""
+        """Compute MASSIVE technical indicators - 200+ features to use ALL RAM."""
         result = df.copy()
         
         if 'close' not in result.columns:
             return result
             
-        close = result['close']
-        high = result.get('high', close)
-        low = result.get('low', close)
-        volume = result.get('volume', pd.Series(0, index=close.index))
+        close = result['close'].astype(np.float64)
+        high = result.get('high', close).astype(np.float64)
+        low = result.get('low', close).astype(np.float64)
+        open_price = result.get('open', close).astype(np.float64)
+        volume = result.get('volume', pd.Series(0, index=close.index)).astype(np.float64)
         
-        # Price features
-        for period in [5, 10, 20, 50]:
-            result[f'sma_{period}'] = close.rolling(period).mean()
-            result[f'ema_{period}'] = close.ewm(span=period).mean()
-            result[f'std_{period}'] = close.rolling(period).std()
+        # ============================================================
+        # PRICE FEATURES - Multiple timeframes (40+ features)
+        # ============================================================
+        for period in [3, 5, 7, 10, 14, 20, 30, 50, 100, 200]:
+            result[f'sma_{period}'] = close.rolling(period, min_periods=1).mean()
+            result[f'ema_{period}'] = close.ewm(span=period, min_periods=1).mean()
+            result[f'wma_{period}'] = close.rolling(period, min_periods=1).apply(
+                lambda x: np.average(x, weights=np.arange(1, len(x)+1)), raw=True
+            )
+            result[f'std_{period}'] = close.rolling(period, min_periods=1).std()
             result[f'return_{period}'] = close.pct_change(period)
+            result[f'log_return_{period}'] = np.log(close / close.shift(period))
+            result[f'price_position_{period}'] = (close - close.rolling(period).min()) / (close.rolling(period).max() - close.rolling(period).min() + 1e-10)
             
-        # Momentum
-        for period in [14, 28]:
+        # ============================================================
+        # MOMENTUM INDICATORS (30+ features)
+        # ============================================================
+        for period in [5, 7, 9, 14, 21, 28]:
             delta = close.diff()
-            gain = delta.where(delta > 0, 0).rolling(period).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+            gain = delta.where(delta > 0, 0).rolling(period, min_periods=1).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(period, min_periods=1).mean()
             rs = gain / (loss + 1e-10)
             result[f'rsi_{period}'] = 100 - (100 / (1 + rs))
             
-        # Volatility
-        result['atr_14'] = self._compute_atr(high, low, close, 14)
-        result['bb_upper'] = result['sma_20'] + 2 * result['std_20']
-        result['bb_lower'] = result['sma_20'] - 2 * result['std_20']
-        result['bb_width'] = (result['bb_upper'] - result['bb_lower']) / (result['sma_20'] + 1e-10)
-        
-        # Volume features
-        if volume.sum() > 0:
-            result['volume_sma_20'] = volume.rolling(20).mean()
-            result['volume_ratio'] = volume / (result['volume_sma_20'] + 1e-10)
+            # Stochastic RSI
+            rsi = result[f'rsi_{period}']
+            result[f'stoch_rsi_{period}'] = (rsi - rsi.rolling(period).min()) / (rsi.rolling(period).max() - rsi.rolling(period).min() + 1e-10)
             
-        # Trend
-        result['trend_strength'] = (close - result['sma_50']) / (result['std_50'] + 1e-10)
+        # MACD variants
+        for fast, slow, signal in [(12, 26, 9), (5, 35, 5), (8, 17, 9)]:
+            ema_fast = close.ewm(span=fast, min_periods=1).mean()
+            ema_slow = close.ewm(span=slow, min_periods=1).mean()
+            macd = ema_fast - ema_slow
+            macd_signal = macd.ewm(span=signal, min_periods=1).mean()
+            result[f'macd_{fast}_{slow}'] = macd
+            result[f'macd_signal_{fast}_{slow}'] = macd_signal
+            result[f'macd_hist_{fast}_{slow}'] = macd - macd_signal
+            
+        # Rate of Change
+        for period in [5, 10, 20, 50]:
+            result[f'roc_{period}'] = (close - close.shift(period)) / (close.shift(period) + 1e-10) * 100
+            result[f'momentum_{period}'] = close - close.shift(period)
+            
+        # Williams %R
+        for period in [14, 28]:
+            highest = high.rolling(period, min_periods=1).max()
+            lowest = low.rolling(period, min_periods=1).min()
+            result[f'williams_r_{period}'] = -100 * (highest - close) / (highest - lowest + 1e-10)
+            
+        # ============================================================
+        # VOLATILITY INDICATORS (30+ features)
+        # ============================================================
+        for period in [5, 10, 14, 20, 30, 50]:
+            result[f'atr_{period}'] = self._compute_atr(high, low, close, period)
+            result[f'natr_{period}'] = result[f'atr_{period}'] / (close + 1e-10) * 100
+            
+        # Bollinger Bands variants
+        for period in [10, 20, 50]:
+            for std_mult in [1.5, 2.0, 2.5, 3.0]:
+                sma = close.rolling(period, min_periods=1).mean()
+                std = close.rolling(period, min_periods=1).std()
+                result[f'bb_upper_{period}_{std_mult}'] = sma + std_mult * std
+                result[f'bb_lower_{period}_{std_mult}'] = sma - std_mult * std
+                result[f'bb_width_{period}_{std_mult}'] = (result[f'bb_upper_{period}_{std_mult}'] - result[f'bb_lower_{period}_{std_mult}']) / (sma + 1e-10)
+                result[f'bb_pct_{period}_{std_mult}'] = (close - result[f'bb_lower_{period}_{std_mult}']) / (result[f'bb_upper_{period}_{std_mult}'] - result[f'bb_lower_{period}_{std_mult}'] + 1e-10)
+                
+        # Keltner Channels
+        for period in [10, 20]:
+            ema = close.ewm(span=period, min_periods=1).mean()
+            atr = self._compute_atr(high, low, close, period)
+            result[f'keltner_upper_{period}'] = ema + 2 * atr
+            result[f'keltner_lower_{period}'] = ema - 2 * atr
+            result[f'keltner_width_{period}'] = 4 * atr / (ema + 1e-10)
+            
+        # Historical volatility
+        for period in [5, 10, 20, 60]:
+            returns = close.pct_change()
+            result[f'hvol_{period}'] = returns.rolling(period, min_periods=1).std() * np.sqrt(252)
+            result[f'hvol_ratio_{period}'] = result[f'hvol_{period}'] / result[f'hvol_{period}'].rolling(period*2, min_periods=1).mean()
+            
+        # ============================================================
+        # VOLUME INDICATORS (20+ features)
+        # ============================================================
+        if volume.sum() > 0:
+            for period in [5, 10, 20, 50]:
+                result[f'volume_sma_{period}'] = volume.rolling(period, min_periods=1).mean()
+                result[f'volume_std_{period}'] = volume.rolling(period, min_periods=1).std()
+                result[f'volume_ratio_{period}'] = volume / (result[f'volume_sma_{period}'] + 1e-10)
+                
+            # OBV
+            obv = (np.sign(close.diff()) * volume).cumsum()
+            result['obv'] = obv
+            result['obv_sma_20'] = obv.rolling(20, min_periods=1).mean()
+            result['obv_slope'] = obv.diff(5) / 5
+            
+            # Money Flow Index
+            for period in [14, 28]:
+                typical_price = (high + low + close) / 3
+                money_flow = typical_price * volume
+                positive_flow = money_flow.where(typical_price > typical_price.shift(1), 0).rolling(period, min_periods=1).sum()
+                negative_flow = money_flow.where(typical_price < typical_price.shift(1), 0).rolling(period, min_periods=1).sum()
+                result[f'mfi_{period}'] = 100 - (100 / (1 + positive_flow / (negative_flow + 1e-10)))
+                
+            # VWAP
+            typical_price = (high + low + close) / 3
+            result['vwap'] = (typical_price * volume).cumsum() / (volume.cumsum() + 1e-10)
+            result['vwap_dist'] = (close - result['vwap']) / (result['vwap'] + 1e-10)
+            
+            # Accumulation/Distribution
+            clv = ((close - low) - (high - close)) / (high - low + 1e-10)
+            result['ad_line'] = (clv * volume).cumsum()
+            result['ad_sma_20'] = result['ad_line'].rolling(20, min_periods=1).mean()
+            
+        # ============================================================
+        # TREND INDICATORS (20+ features)
+        # ============================================================
+        # ADX
+        for period in [14, 28]:
+            plus_dm = high.diff()
+            minus_dm = -low.diff()
+            plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0)
+            minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0)
+            
+            atr = self._compute_atr(high, low, close, period)
+            plus_di = 100 * plus_dm.rolling(period, min_periods=1).mean() / (atr + 1e-10)
+            minus_di = 100 * minus_dm.rolling(period, min_periods=1).mean() / (atr + 1e-10)
+            
+            dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
+            result[f'adx_{period}'] = dx.rolling(period, min_periods=1).mean()
+            result[f'plus_di_{period}'] = plus_di
+            result[f'minus_di_{period}'] = minus_di
+            
+        # Aroon
+        for period in [14, 25]:
+            result[f'aroon_up_{period}'] = 100 * high.rolling(period+1, min_periods=1).apply(lambda x: x.argmax(), raw=True) / period
+            result[f'aroon_down_{period}'] = 100 * low.rolling(period+1, min_periods=1).apply(lambda x: x.argmin(), raw=True) / period
+            result[f'aroon_osc_{period}'] = result[f'aroon_up_{period}'] - result[f'aroon_down_{period}']
+            
+        # CCI
+        for period in [14, 20]:
+            typical_price = (high + low + close) / 3
+            sma = typical_price.rolling(period, min_periods=1).mean()
+            mad = typical_price.rolling(period, min_periods=1).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
+            result[f'cci_{period}'] = (typical_price - sma) / (0.015 * mad + 1e-10)
+            
+        # ============================================================
+        # CANDLESTICK PATTERNS (15+ features)
+        # ============================================================
+        result['body_size'] = abs(close - open_price) / (high - low + 1e-10)
+        result['upper_shadow'] = (high - np.maximum(close, open_price)) / (high - low + 1e-10)
+        result['lower_shadow'] = (np.minimum(close, open_price) - low) / (high - low + 1e-10)
+        result['is_bullish'] = (close > open_price).astype(np.float64)
+        result['body_to_range'] = abs(close - open_price) / (high - low + 1e-10)
         
+        # Doji detection
+        result['is_doji'] = (result['body_size'] < 0.1).astype(np.float64)
+        
+        # Engulfing patterns
+        result['bullish_engulf'] = ((close > open_price) & (close.shift(1) < open_price.shift(1)) & 
+                                    (close > open_price.shift(1)) & (open_price < close.shift(1))).astype(np.float64)
+        result['bearish_engulf'] = ((close < open_price) & (close.shift(1) > open_price.shift(1)) & 
+                                    (close < open_price.shift(1)) & (open_price > close.shift(1))).astype(np.float64)
+                                    
+        # ============================================================
+        # STATISTICAL FEATURES (20+ features)
+        # ============================================================
+        returns = close.pct_change()
+        for period in [10, 20, 50, 100]:
+            result[f'skew_{period}'] = returns.rolling(period, min_periods=1).skew()
+            result[f'kurt_{period}'] = returns.rolling(period, min_periods=1).kurt()
+            result[f'zscore_{period}'] = (close - close.rolling(period, min_periods=1).mean()) / (close.rolling(period, min_periods=1).std() + 1e-10)
+            result[f'percentile_{period}'] = close.rolling(period, min_periods=1).apply(lambda x: stats.percentileofscore(x, x.iloc[-1])/100, raw=False)
+            
+        # ============================================================
+        # CROSS-OVER SIGNALS (10+ features)
+        # ============================================================
+        result['sma_5_20_cross'] = (result['sma_5'] > result['sma_20']).astype(np.float64)
+        result['sma_10_50_cross'] = (result['sma_10'] > result['sma_50']).astype(np.float64)
+        result['sma_20_100_cross'] = (result['sma_20'] > result['sma_100']).astype(np.float64)
+        result['ema_5_20_cross'] = (result['ema_5'] > result['ema_20']).astype(np.float64)
+        result['price_sma_20_cross'] = (close > result['sma_20']).astype(np.float64)
+        result['price_sma_50_cross'] = (close > result['sma_50']).astype(np.float64)
+        
+        # Distance from MAs
+        for period in [10, 20, 50, 100, 200]:
+            result[f'dist_sma_{period}'] = (close - result[f'sma_{period}']) / (result[f'sma_{period}'] + 1e-10)
+            result[f'dist_ema_{period}'] = (close - result[f'ema_{period}']) / (result[f'ema_{period}'] + 1e-10)
+            
+        # ============================================================
+        # LAG FEATURES (create memory - 20+ features)
+        # ============================================================
+        for lag in [1, 2, 3, 5, 10]:
+            result[f'close_lag_{lag}'] = close.shift(lag)
+            result[f'return_lag_{lag}'] = returns.shift(lag)
+            result[f'volume_lag_{lag}'] = volume.shift(lag) if volume.sum() > 0 else 0
+            result[f'high_low_range_lag_{lag}'] = ((high - low) / (close + 1e-10)).shift(lag)
+            
         return result
     
     def _compute_atr(self, high: pd.Series, low: pd.Series, 
@@ -1266,36 +1538,57 @@ class ParallelFeatureEngine:
         return result
     
     def process_symbol(self, symbol: str, klines_data: Dict[str, pd.DataFrame]) -> Dict:
-        """Process all features for a symbol."""
+        """Process all features for a symbol - HEAVY computation per worker."""
         result = {'symbol': symbol, 'features': {}}
         
         for tf, df in klines_data.items():
-            processed = self.compute_technical_features(df)
+            # Deep copy to use more RAM
+            processed = self.compute_technical_features(df.copy())
             processed = self.compute_risk_features(processed)
+            # Force memory allocation
+            processed = processed.copy()
             result['features'][tf] = processed
             
         return result
     
     def build_features_parallel(self, data_loader: OptimizedDataLoader) -> Dict:
-        """Build features for all symbols in parallel."""
-        self.logger.info("Building features in parallel...")
+        """Build features with MAXIMUM CPU and RAM usage."""
+        self.logger.info("Building 200+ features with MAXIMUM CPU/RAM usage...")
         start_time = time.time()
         
-        results = Parallel(
-            n_jobs=self.config.n_jobs,
-            backend=self.config.parallel_backend,
-            verbose=0
-        )(
-            delayed(self.process_symbol)(symbol, data_loader.klines[symbol])
-            for symbol in data_loader.symbols
-            if symbol in data_loader.klines
-        )
+        symbols_to_process = [s for s in data_loader.symbols if s in data_loader.klines]
+        total_symbols = len(symbols_to_process)
         
-        features = {r['symbol']: r['features'] for r in results}
+        self.logger.info(f"Processing {total_symbols} symbols with {self.config.n_cpu} workers...")
+        
+        # Use multiprocessing Pool directly for better control
+        from multiprocessing import Pool, get_context
+        
+        # Prepare work items - each item is (symbol, klines_dict)
+        work_items = [(s, data_loader.klines[s]) for s in symbols_to_process]
+        
+        # Use 'fork' for faster startup and shared memory
+        ctx = get_context('fork')
+        
+        with ctx.Pool(processes=self.config.n_cpu) as pool:
+            # Use imap_unordered for better load balancing
+            results_list = list(pool.starmap(
+                self._process_symbol_static,
+                [(self.config, item[0], item[1]) for item in work_items],
+                chunksize=1  # Process one symbol at a time for max parallelism
+            ))
+        
+        features = {r['symbol']: r['features'] for r in results_list}
         elapsed = time.time() - start_time
-        self.logger.info(f"Features built in {elapsed:.1f}s")
+        self.logger.info(f"Features built in {elapsed:.1f}s for {total_symbols} symbols")
         
         return features
+    
+    @staticmethod
+    def _process_symbol_static(config, symbol: str, klines_data: Dict[str, pd.DataFrame]) -> Dict:
+        """Static method for multiprocessing - process one symbol."""
+        engine = ParallelFeatureEngine(config, None)
+        return engine.process_symbol(symbol, klines_data)
 
 
 # ==============================================================================
@@ -1316,6 +1609,9 @@ class BaseTradingModel:
         
     def prepare_data(self, X: pd.DataFrame, y: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
         """Prepare data for training."""
+        # Select only numeric columns
+        X = X.select_dtypes(include=[np.number])
+        
         # Handle infinities and NaN
         X = X.replace([np.inf, -np.inf], np.nan)
         
@@ -1343,44 +1639,113 @@ class BaseTradingModel:
 
 
 class LightGBMTradingModel(BaseTradingModel):
-    """LightGBM-based trading model."""
+    """LightGBM-based trading model - MAXIMUM PERFORMANCE with ALL CPU cores and RAM."""
     
     def __init__(self, model_type: ModelType, config: SystemConfig, logger: RiskLogger):
         super().__init__(model_type, config, logger)
+        
+        # Calculate available memory for histogram (use 70% of total for MAXIMUM)
+        available_ram_mb = int(config.total_ram_gb * 1024 * 0.7)
+        
         self.default_params = {
             'objective': 'binary',
             'metric': 'auc',
             'boosting_type': 'gbdt',
-            'num_leaves': 31,
-            'learning_rate': 0.05,
-            'feature_fraction': 0.8,
-            'bagging_fraction': 0.8,
-            'bagging_freq': 5,
+            
+            # === MAXIMUM CPU PARALLELIZATION ===
+            'num_threads': config.n_cpu,  # ALL 48 cores
+            'force_row_wise': True,  # Better parallelization for large data
+            'force_col_wise': False,
+            'device_type': 'cpu',
+            
+            # === AGGRESSIVE TREE SETTINGS (use more RAM) ===
+            'num_leaves': config.num_leaves,  # 255 leaves
+            'max_depth': 15,  # Deep trees for complex patterns
+            'min_data_in_leaf': config.min_data_in_leaf,  # 10
+            'min_sum_hessian_in_leaf': 1e-3,
+            
+            # === HISTOGRAM OPTIMIZATION (MAXIMUM RAM usage) ===
+            'max_bin': config.max_bin,  # 512 bins
+            'bin_construct_sample_cnt': config.bin_construct_sample_cnt,  # 5M samples
+            'histogram_pool_size': available_ram_mb,  # ~260GB for histogram cache
+            
+            # === LEARNING SETTINGS ===
+            'learning_rate': 0.03,  # Lower LR for more iterations
+            'feature_fraction': 0.9,  # Use more features
+            'feature_fraction_bynode': config.feature_fraction_bynode,
+            'bagging_fraction': 0.9,
+            'bagging_freq': 1,  # Bagging every iteration for variance
+            'pos_bagging_fraction': 1.0,
+            'neg_bagging_fraction': 1.0,
+            
+            # === REGULARIZATION (minimal for speed) ===
+            'lambda_l1': 0.0,
+            'lambda_l2': 0.0,
+            'min_gain_to_split': 0.0,
+            'extra_trees': False,
+            
+            # === CRITICAL FIX: feature_pre_filter ===
+            'feature_pre_filter': False,  # MUST be False to avoid the error
+            
+            # === PERFORMANCE FLAGS ===
             'verbose': -1,
-            'n_jobs': config.n_jobs,
-            'random_state': config.random_seed
+            'random_state': config.random_seed,
+            'deterministic': False,  # Non-deterministic for MAX speed
+            'enable_bundle': True,  # Exclusive feature bundling
+            'is_enable_sparse': True,
+            'max_conflict_rate': 0.0,
+            'zero_as_missing': False,
+            'use_missing': True,
+            'two_round': False,  # Single pass for speed
+            'linear_tree': False,
         }
         
     def train(self, X: np.ndarray, y: np.ndarray, params: Dict = None):
-        """Train LightGBM model."""
+        """Train LightGBM model with MAXIMUM performance - ALL CPU cores and RAM."""
         train_params = self.default_params.copy()
         if params:
             train_params.update(params)
-            
-        # Create dataset
-        train_data = lgb.Dataset(X, label=y)
         
-        # Train
+        n_samples, n_features = X.shape
+        estimated_ram_gb = (n_samples * n_features * 8) / (1024**3) * 3  # Estimate with copies
+        
+        self.logger.info(f"  Training with {train_params['num_threads']} CPU threads")
+        self.logger.info(f"  Data: {n_samples:,} samples, {n_features} features")
+        self.logger.info(f"  Estimated RAM usage: {estimated_ram_gb:.1f} GB")
+        self.logger.info(f"  Settings: num_leaves={train_params['num_leaves']}, max_bin={train_params['max_bin']}, max_depth={train_params['max_depth']}")
+        
+        # Create dataset with MAXIMUM parallelization for binning
+        train_data = lgb.Dataset(
+            X, 
+            label=y,
+            free_raw_data=False,  # Keep raw data for reuse (uses more RAM)
+            params={
+                'max_bin': train_params['max_bin'],
+                'bin_construct_sample_cnt': train_params.get('bin_construct_sample_cnt', 5000000),
+                'num_threads': train_params['num_threads'],  # Parallel binning
+                'feature_pre_filter': False,  # Required to avoid error
+            }
+        )
+        
+        # Pre-construct bins in parallel (uses ALL cores and more RAM)
+        self.logger.info("  Constructing histogram bins (ALL CPU cores + RAM)...")
+        train_data.construct()
+        
+        # Train with more iterations for better accuracy
+        self.logger.info("  Starting GBDT training (ALL CPU cores)...")
         self.model = lgb.train(
             train_params,
             train_data,
-            num_boost_round=1000,
+            num_boost_round=2000,
             valid_sets=[train_data],
-            callbacks=[lgb.early_stopping(50, verbose=False)]
+            callbacks=[
+                lgb.early_stopping(100, verbose=False),
+                lgb.log_evaluation(period=200)
+            ]
         )
         
         self.is_trained = True
-        self.logger.info(f"{self.model_type.value} model trained")
+        self.logger.info(f"  {self.model_type.value} model trained: {self.model.num_trees()} trees, best_iteration={self.model.best_iteration}")
         
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Get prediction probabilities."""
@@ -1625,19 +1990,29 @@ class RiskModelOptimizer:
                 X_val: np.ndarray, y_val: np.ndarray,
                 returns_train: np.ndarray, returns_val: np.ndarray,
                 n_trials: int = 100) -> Dict:
-        """Run multi-objective optimization."""
+        """Run multi-objective optimization with MAXIMUM parallelism."""
         
         if not OPTUNA_AVAILABLE:
             self.logger.warning("Optuna not available, using default parameters")
             return {}
             
-        self.logger.info(f"Starting Optuna optimization with {n_trials} trials")
+        self.logger.info(f"Starting Optuna optimization with {n_trials} trials and {self.config.n_cpu} parallel workers")
         
-        # Create multi-objective study
+        # Create multi-objective study with aggressive settings
         self.study = optuna.create_study(
             directions=['maximize', 'maximize', 'maximize'],  # AUC, -CVaR, -MaxDD
-            sampler=TPESampler(seed=self.config.random_seed, n_startup_trials=20),
-            pruner=HyperbandPruner()
+            sampler=TPESampler(
+                seed=self.config.random_seed, 
+                n_startup_trials=10,  # Less startup for faster convergence
+                n_ei_candidates=48,   # More candidates per trial
+                multivariate=True,    # Enable multivariate TPE
+                warn_independent_sampling=False
+            ),
+            pruner=HyperbandPruner(
+                min_resource=1,
+                max_resource=n_trials,
+                reduction_factor=3
+            )
         )
         
         # Create objective
@@ -1645,13 +2020,15 @@ class RiskModelOptimizer:
             X_train, y_train, X_val, y_val, returns_train, returns_val
         )
         
-        # Optimize with parallel trials
+        # Optimize with MAXIMUM parallel trials (each trial uses 1 thread)
+        # This uses ALL CPU cores across many trials
         self.study.optimize(
             objective,
             n_trials=n_trials,
-            n_jobs=self.config.n_jobs,
+            n_jobs=min(self.config.n_cpu, 24),  # Cap at 24 parallel trials to avoid memory issues
             show_progress_bar=True,
-            catch=(Exception,)
+            catch=(Exception,),
+            gc_after_trial=True  # Free memory after each trial
         )
         
         # Get Pareto front
@@ -1784,7 +2161,7 @@ class ProductionTrainingPipeline:
     """
     Production-grade training pipeline.
     
-    Designed to saturate 100% CPU and aggressively utilize RAM.
+    Designed to saturate 100% CPU and aggressively utilize ALL RAM.
     """
     
     def __init__(self, config: SystemConfig = None):
@@ -1802,21 +2179,32 @@ class ProductionTrainingPipeline:
         self.models: Dict[ModelType, BaseTradingModel] = {}
         self.risk_model: Optional[RiskModel] = None
         
+        # Features storage (will hold 200+ features per symbol)
+        self.features: Dict = {}
+        
         # Results
         self.training_results: Dict = {}
         self.final_metrics: Dict = {}
         
     def print_header(self):
-        """Print system header."""
+        """Print system header with config info."""
+        config_path = Path(__file__).parent / 'config.yaml'
+        config_status = "✓ Loaded" if config_path.exists() else "✗ Not found (using defaults)"
+        
         print("=" * 80)
         print("  PRODUCTION-GRADE MULTI-MODEL FUTURES TRADING SYSTEM")
-        print("  WITH INTEGRATED RISK ENGINE")
+        print("  Configure via: project/config.yaml")
         print("=" * 80)
-        print(f"  CPU Cores: {self.config.n_cpu}")
-        print(f"  RAM: {self.config.total_ram_gb:.1f} GB")
+        print(f"  Config: {config_status}")
+        print(f"  CPU Cores: {self.config.n_cpu}/{self.config.n_cpu_total} ({self.config.cpu_usage_pct*100:.0f}%)")
+        if self.config.cpu_load_limit:
+            print(f"  CPU Load Limit: {self.config.cpu_load_limit*100:.0f}% per core (via cpulimit)")
+        print(f"  RAM: {self.config.total_ram_gb:.1f} GB (using {self.config.ram_usage_pct*100:.0f}%)")
         print(f"  Workers: {self.config.n_jobs}")
-        print(f"  Optuna: {'Available' if OPTUNA_AVAILABLE else 'Not Available'}")
-        print(f"  ONNX: {'Available' if ONNX_AVAILABLE else 'Not Available'}")
+        print(f"  LightGBM: max_bin={self.config.max_bin}, leaves={self.config.num_leaves}, lr={self.config.learning_rate}")
+        print(f"  Optuna: {'Yes' if OPTUNA_AVAILABLE else 'No'} ({self.config.optuna_n_trials} trials) | ONNX: {'Yes' if ONNX_AVAILABLE else 'No'}")
+        print("=" * 80)
+        print(f"  Edit config.yaml to change CPU/RAM usage, LightGBM params, etc.")
         print("=" * 80)
         print()
         
@@ -1834,19 +2222,78 @@ class ProductionTrainingPipeline:
         return data
         
     def build_features(self):
-        """Build features for all symbols."""
+        """Build features for all symbols - GENERATES 200+ FEATURES."""
         self.logger.info("=" * 60)
-        self.logger.info("PHASE 2: FEATURE ENGINEERING")
+        self.logger.info("PHASE 2: FEATURE ENGINEERING (200+ features per symbol)")
         self.logger.info("=" * 60)
         
-        features = self.feature_engine.build_features_parallel(self.data_loader)
+        self.features = self.feature_engine.build_features_parallel(self.data_loader)
         
-        return features
+        # Count total features generated
+        sample_symbol = list(self.features.keys())[0] if self.features else None
+        if sample_symbol and self.features[sample_symbol]:
+            sample_tf = list(self.features[sample_symbol].keys())[0]
+            n_features = len(self.features[sample_symbol][sample_tf].columns)
+            self.logger.info(f"Generated {n_features} features per timeframe")
+        
+        return self.features
+    
+    def _get_training_data_with_features(self, model_type: ModelType) -> Tuple[pd.DataFrame, pd.Series]:
+        """Get training data with ALL generated features."""
+        timeframe_map = {
+            ModelType.SCALP: '5m',
+            ModelType.INTRADAY: '1h',
+            ModelType.SWING: '1d'
+        }
+        primary_tf = timeframe_map.get(model_type, '1h')
+        
+        all_data = []
+        
+        for symbol in self.data_loader.symbols:
+            if symbol not in self.features:
+                continue
+            if primary_tf not in self.features[symbol]:
+                continue
+                
+            df = self.features[symbol][primary_tf].copy()
+            df['symbol'] = symbol
+            all_data.append(df)
+            
+        if not all_data:
+            return pd.DataFrame(), pd.Series()
+            
+        self.logger.info(f"  Concatenating data from {len(all_data)} symbols...")
+        combined = pd.concat(all_data, ignore_index=True)
+        
+        # Create target
+        combined['future_return'] = combined.groupby('symbol')['close'].pct_change(1).shift(-1)
+        combined = combined.dropna(subset=['future_return'])
+        combined['target'] = (combined['future_return'] > 0).astype(np.int32)
+        
+        # Exclude non-feature columns
+        exclude_cols = ['symbol', 'open_time', 'timestamp', 'future_return', 'target', 
+                       'interval', 'market_type', 'close_time', 'quote_volume', 
+                       'count', 'taker_buy_volume', 'taker_buy_quote_volume', 'ignore']
+        
+        feature_cols = [c for c in combined.columns if c not in exclude_cols]
+        
+        X = combined[feature_cols]
+        y = combined['target']
+        
+        # Convert to float64 and handle NaN
+        X = X.select_dtypes(include=[np.number]).astype(np.float64)
+        X = X.replace([np.inf, -np.inf], np.nan)
+        
+        # Fill NaN with column medians
+        self.logger.info(f"  Handling missing values in {X.shape[1]} features...")
+        X = X.fillna(X.median())
+        
+        return X, y
         
     def train_trading_models(self):
-        """Train all trading models."""
+        """Train all trading models with 200+ features."""
         self.logger.info("=" * 60)
-        self.logger.info("PHASE 3: TRADING MODEL TRAINING")
+        self.logger.info("PHASE 3: TRADING MODEL TRAINING (200+ features)")
         self.logger.info("=" * 60)
         
         results = {}
@@ -1854,14 +2301,17 @@ class ProductionTrainingPipeline:
         for model_type in [ModelType.SCALP, ModelType.INTRADAY, ModelType.SWING]:
             self.logger.info(f"\nTraining {model_type.value.upper()} model...")
             
-            # Get training data
-            X, y = self.data_loader.get_training_data(model_type)
+            # Get training data with ALL features
+            X, y = self._get_training_data_with_features(model_type)
             
             if len(X) == 0:
                 self.logger.warning(f"No data for {model_type.value}")
                 continue
-                
+            
+            # Log RAM usage estimate
+            ram_usage_gb = (X.memory_usage(deep=True).sum()) / (1024**3)
             self.logger.info(f"  Data: {len(X):,} samples, {X.shape[1]} features")
+            self.logger.info(f"  Feature matrix RAM: {ram_usage_gb:.2f} GB")
             
             # Split data
             split_idx = int(len(X) * (1 - self.config.test_size))
@@ -1875,7 +2325,9 @@ class ProductionTrainingPipeline:
             model.train(X_train_scaled, y_train_arr)
             
             # Evaluate
-            X_test_scaled = model.scaler.transform(X_test.replace([np.inf, -np.inf], np.nan).fillna(X_test.median()))
+            X_test_numeric = X_test.select_dtypes(include=[np.number])
+            X_test_numeric = X_test_numeric.replace([np.inf, -np.inf], np.nan).fillna(X_test_numeric.median())
+            X_test_scaled = model.scaler.transform(X_test_numeric[model.feature_names])
             y_pred = model.predict_proba(X_test_scaled)
             
             try:
@@ -2155,10 +2607,18 @@ def main():
     parser.add_argument('--model-path', type=str,
                        default='/home/ai/NogutiAI/aiTrainCrypto/models',
                        help='Path to save models')
-    parser.add_argument('--n-trials', type=int, default=50,
+    parser.add_argument('--n-trials', '--trials', type=int, default=50,
                        help='Number of Optuna trials')
     parser.add_argument('--fast', action='store_true',
                        help='Fast mode with reduced trials')
+    parser.add_argument('--cpu', type=float, default=None,
+                       help='CPU usage percent (0.1-1.0), overrides config.yaml')
+    parser.add_argument('--cores', type=int, default=None,
+                       help='Exact number of CPU cores to use, overrides config.yaml')
+    parser.add_argument('--no-cpulimit', action='store_true',
+                       help='Disable cpulimit even if set in config')
+    parser.add_argument('--_cpulimit_child', action='store_true',
+                       help=argparse.SUPPRESS)  # Internal flag
     
     args = parser.parse_args()
     
@@ -2167,9 +2627,73 @@ def main():
     config.data_path = args.data_path
     config.model_path = args.model_path
     
+    # Override CPU settings from command line
+    if args.cores:
+        config.n_cpu = args.cores
+        config.n_jobs = args.cores
+    elif args.cpu:
+        import multiprocessing as mp
+        config.n_cpu = max(1, int(mp.cpu_count() * args.cpu))
+        config.n_jobs = config.n_cpu
+    
+    # Override Optuna trials
+    if args.n_trials:
+        config.optuna_n_trials = args.n_trials
+    
     if args.fast:
         # Reduce trials for fast testing
-        pass
+        config.optuna_n_trials = min(10, config.optuna_n_trials)
+    
+    # Apply CPU limit if configured
+    if config.cpu_load_limit and not args.no_cpulimit and not args._cpulimit_child:
+        import subprocess
+        import shutil
+        
+        method = config.cpu_limit_method
+        limit_pct = int(config.cpu_load_limit * 100)
+        
+        if method == 'cgroups':
+            # Use systemd-run with CPUQuota (most reliable for multiprocessing)
+            # CPUQuota: 80% per core * 48 cores = 3840%
+            total_quota = int(config.n_cpu * config.cpu_load_limit * 100)
+            
+            print(f"[cgroups] Restarting with CPU quota: {total_quota}% ({config.n_cpu} cores × {limit_pct}%)")
+            
+            # Build command with systemd-run
+            new_args = sys.argv + ['--_cpulimit_child']
+            cmd = [
+                'systemd-run', '--user', '--scope',
+                f'--property=CPUQuota={total_quota}%',
+                sys.executable
+            ] + new_args
+            
+            try:
+                os.execvp('systemd-run', cmd)
+            except Exception as e:
+                print(f"[WARNING] systemd-run failed: {e}")
+                print("[WARNING] Trying cpulimit fallback...")
+                method = 'cpulimit'
+        
+        if method == 'cpulimit':
+            cpulimit_path = shutil.which('cpulimit')
+            if cpulimit_path:
+                total_limit = int(config.n_cpu * config.cpu_load_limit * 100)
+                
+                print(f"[cpulimit] Restarting with CPU limit: {total_limit}% ({config.n_cpu} cores × {limit_pct}%)")
+                
+                new_args = sys.argv + ['--_cpulimit_child']
+                cmd = [cpulimit_path, '-i', '-l', str(total_limit), '--', sys.executable] + new_args
+                
+                os.execvp(cpulimit_path, cmd)
+            else:
+                print("[WARNING] cpulimit not found. Install: sudo dnf install cpulimit")
+        
+        if method == 'nice':
+            # Use nice for lower priority (doesn't limit, but reduces contention)
+            print(f"[nice] Running with nice level 10 (reduced priority)")
+            new_args = sys.argv + ['--_cpulimit_child']
+            cmd = ['nice', '-n', '10', sys.executable] + new_args
+            os.execvp('nice', cmd)
         
     # Run pipeline
     pipeline = ProductionTrainingPipeline(config)
