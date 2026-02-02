@@ -1,0 +1,165 @@
+2026-02-02 16:29:58 |     INFO | Risk Engine initialized
+2026-02-02 16:29:58 |     INFO | ============================================================
+2026-02-02 16:29:58 |     INFO | PHASE 1: DATA LOADING (Polars)
+2026-02-02 16:29:58 |     INFO | ============================================================
+2026-02-02 16:29:58 |     INFO | Loading data from /home/ai/NogutiAI/aiTrainCrypto/data
+2026-02-02 16:29:58 |     INFO | Discovered 102 symbols
+2026-02-02 16:29:58 |     INFO | Found 102 symbols
+2026-02-02 16:29:58 |     INFO | Loading with 48 parallel workers (Polars)...
+2026-02-02 16:30:07 |     INFO | Loaded 71,803,206 rows (lazy) in 8.9s
+2026-02-02 16:30:07 |     INFO | Loaded 102 symbols
+2026-02-02 16:30:07 |     INFO | Total rows: 71,803,206
+2026-02-02 16:30:07 |     INFO | ============================================================
+2026-02-02 16:30:07 |     INFO | PHASE 2: FEATURE ENGINEERING (Polars - Parallel)
+2026-02-02 16:30:07 |     INFO | ============================================================
+2026-02-02 16:30:07 |     INFO | Building 150+ features with Polars (fully parallel)...
+2026-02-02 16:30:07 |     INFO | Processing 102 symbols with Polars parallel engine...
+2026-02-02 16:30:09 |     INFO | Features built in 1.5s for 102 symbols
+2026-02-02 16:30:09 |     INFO | Generated 201 features per timeframe
+2026-02-02 16:30:09 |     INFO | ============================================================
+2026-02-02 16:30:09 |     INFO | PHASE 3: TRADING MODEL TRAINING
+2026-02-02 16:30:09 |     INFO | ============================================================
+2026-02-02 16:30:09 |     INFO | 
+Training SCALP model...
+2026-02-02 16:30:09 |     INFO |   Collecting 102 symbols with Polars...
+2026-02-02 16:30:09 |     INFO |   Collecting data (Polars parallel)...
+2026-02-02 16:30:40 |     INFO |   Sampling 10,000,000 from 54,332,632 rows for efficient training...
+2026-02-02 16:30:44 |     INFO |   Converting to numpy (194 features)...
+2026-02-02 16:31:00 |     INFO |   Data ready: 10,000,000 samples, 194 features
+2026-02-02 16:31:00 |     INFO |   Data: 10,000,000 samples, 194 features
+2026-02-02 16:31:00 |     INFO |   Feature matrix RAM: 7.23 GB
+2026-02-02 16:32:02 |     INFO |   LightGBM training: 8,000,000 samples, 194 features, 48 threads
+2026-02-02 16:32:02 |     INFO |   Creating LightGBM Dataset (binning)...
+2026-02-02 16:32:53 |     INFO |   Dataset ready, starting training...
+2026-02-02 16:58:50 |     INFO |   Best iteration: 1146
+2026-02-02 16:59:01 |     INFO |   AUC: 0.5561
+2026-02-02 16:59:01 |     INFO |   Memory freed after scalp training.
+2026-02-02 16:59:01 |     INFO | 
+Training INTRADAY model...
+2026-02-02 16:59:01 |     INFO |   Collecting 102 symbols with Polars...
+2026-02-02 16:59:01 |     INFO |   Collecting data (Polars parallel)...
+2026-02-02 16:59:06 |     INFO |   Converting to numpy (194 features)...
+2026-02-02 16:59:12 |     INFO |   Data ready: 4,527,642 samples, 194 features
+2026-02-02 16:59:12 |     INFO |   Data: 4,527,642 samples, 194 features
+2026-02-02 16:59:12 |     INFO |   Feature matrix RAM: 3.27 GB
+2026-02-02 16:59:32 |     INFO |   LightGBM training: 3,622,113 samples, 194 features, 48 threads
+2026-02-02 16:59:32 |     INFO |   Creating LightGBM Dataset (binning)...
+2026-02-02 17:00:04 |     INFO |   Dataset ready, starting training...
+2026-02-02 17:17:35 |     INFO |   Best iteration: 1998
+2026-02-02 17:17:41 |     INFO |   AUC: 0.6222
+2026-02-02 17:17:41 |     INFO |   Memory freed after intraday training.
+2026-02-02 17:17:41 |     INFO | 
+Training SWING model...
+2026-02-02 17:17:41 |     INFO |   Collecting 102 symbols with Polars...
+2026-02-02 17:17:42 |     INFO |   Collecting data (Polars parallel)...
+2026-02-02 17:17:43 |     INFO |   Converting to numpy (194 features)...
+2026-02-02 17:17:43 |     INFO |   Data ready: 188,581 samples, 194 features
+2026-02-02 17:17:43 |     INFO |   Data: 188,581 samples, 194 features
+2026-02-02 17:17:43 |     INFO |   Feature matrix RAM: 0.14 GB
+2026-02-02 17:17:44 |     INFO |   LightGBM training: 150,864 samples, 194 features, 48 threads
+2026-02-02 17:17:44 |     INFO |   Creating LightGBM Dataset (binning)...
+2026-02-02 17:17:46 |     INFO |   Dataset ready, starting training...
+2026-02-02 17:21:16 |     INFO |   Best iteration: 1952
+2026-02-02 17:21:17 |     INFO |   AUC: 0.7774
+2026-02-02 17:21:17 |     INFO |   Memory freed after swing training.
+2026-02-02 17:21:17 |     INFO | ============================================================
+2026-02-02 17:21:17 |     INFO | PHASE 4: RISK MODEL TRAINING
+2026-02-02 17:21:17 |     INFO | ============================================================
+2026-02-02 17:21:17 |    ERROR | No data available for risk model training
+2026-02-02 17:21:17 |     INFO | ============================================================
+2026-02-02 17:21:17 |     INFO | PHASE 5: MODEL EXPORT
+2026-02-02 17:21:17 |     INFO | ============================================================
+2026-02-02 17:21:17 |    ERROR | Config export failed: [Errno 2] No such file or directory: '/home/ai/NogutiAI/aiTrainCrypto/models/risk_engine_config_20260202_172117.json'
+2026-02-02 17:21:17 |    ERROR | Training failed: [Errno 2] No such file or directory: '/home/ai/NogutiAI/aiTrainCrypto/models/training_results_20260202_172117.json'
+Traceback (most recent call last):
+  File "/home/ai/NogutiAI/aiTrainCrypto/project/train_with_risk.py", line 2299, in run
+    self.export_models()
+  File "/home/ai/NogutiAI/aiTrainCrypto/project/train_with_risk.py", line 2211, in export_models
+    with open(results_path, 'w') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/home/ai/NogutiAI/aiTrainCrypto/models/training_results_20260202_172117.json'
+================================================================================
+  PRODUCTION-GRADE MULTI-MODEL FUTURES TRADING SYSTEM
+  POLARS VERSION - High-Performance Parallel Processing
+  Configure via: project/config.yaml
+================================================================================
+  Config: ✓ Loaded
+  CPU Cores: 48/48 (100%)
+  RAM: 300.0 GB × 92% = 276.0 GB, max=300GB
+  Workers: 48
+  LightGBM: max_bin=512, leaves=255, lr=0.03
+  Optuna: Yes (30 trials) | ONNX: Yes
+================================================================================
+  Edit config.yaml to change CPU/RAM usage, LightGBM params, etc.
+================================================================================
+
+Training until validation scores don't improve for 100 rounds
+[100]	train's auc: 0.55827	valid's auc: 0.550296
+[200]	train's auc: 0.569713	valid's auc: 0.552958
+[300]	train's auc: 0.579412	valid's auc: 0.553919
+[400]	train's auc: 0.588222	valid's auc: 0.554687
+[500]	train's auc: 0.596641	valid's auc: 0.555333
+[600]	train's auc: 0.604672	valid's auc: 0.555782
+[700]	train's auc: 0.612485	valid's auc: 0.555953
+[800]	train's auc: 0.620061	valid's auc: 0.55621
+[900]	train's auc: 0.62697	valid's auc: 0.556473
+[1000]	train's auc: 0.633553	valid's auc: 0.556848
+[1100]	train's auc: 0.640558	valid's auc: 0.557072
+[1200]	train's auc: 0.646614	valid's auc: 0.55708
+Early stopping, best iteration is:
+[1146]	train's auc: 0.643467	valid's auc: 0.557141
+Training until validation scores don't improve for 100 rounds
+[100]	train's auc: 0.59421	valid's auc: 0.573658
+[200]	train's auc: 0.619569	valid's auc: 0.588779
+[300]	train's auc: 0.638283	valid's auc: 0.597329
+[400]	train's auc: 0.653282	valid's auc: 0.60254
+[500]	train's auc: 0.66817	valid's auc: 0.607413
+[600]	train's auc: 0.680062	valid's auc: 0.610849
+[700]	train's auc: 0.69238	valid's auc: 0.614186
+[800]	train's auc: 0.70412	valid's auc: 0.617628
+[900]	train's auc: 0.714729	valid's auc: 0.620603
+[1000]	train's auc: 0.723931	valid's auc: 0.622068
+[1100]	train's auc: 0.733724	valid's auc: 0.62464
+[1200]	train's auc: 0.743072	valid's auc: 0.626487
+[1300]	train's auc: 0.751729	valid's auc: 0.628767
+[1400]	train's auc: 0.760175	valid's auc: 0.630394
+[1500]	train's auc: 0.768828	valid's auc: 0.632184
+[1600]	train's auc: 0.776302	valid's auc: 0.633628
+[1700]	train's auc: 0.783667	valid's auc: 0.635088
+[1800]	train's auc: 0.790663	valid's auc: 0.636378
+[1900]	train's auc: 0.797715	valid's auc: 0.637732
+[2000]	train's auc: 0.803713	valid's auc: 0.638768
+Did not meet early stopping. Best iteration is:
+[1998]	train's auc: 0.803544	valid's auc: 0.638769
+Training until validation scores don't improve for 100 rounds
+[100]	train's auc: 0.88268	valid's auc: 0.744748
+[200]	train's auc: 0.939304	valid's auc: 0.763259
+[300]	train's auc: 0.967771	valid's auc: 0.773246
+[400]	train's auc: 0.982458	valid's auc: 0.778626
+[500]	train's auc: 0.990757	valid's auc: 0.782492
+[600]	train's auc: 0.994916	valid's auc: 0.785588
+[700]	train's auc: 0.997211	valid's auc: 0.789135
+[800]	train's auc: 0.998535	valid's auc: 0.79164
+[900]	train's auc: 0.999162	valid's auc: 0.792705
+[1000]	train's auc: 0.999574	valid's auc: 0.794697
+[1100]	train's auc: 0.999795	valid's auc: 0.796014
+[1200]	train's auc: 0.9999	valid's auc: 0.797605
+[1300]	train's auc: 0.999952	valid's auc: 0.798675
+[1400]	train's auc: 0.999979	valid's auc: 0.799613
+[1500]	train's auc: 0.999992	valid's auc: 0.801112
+[1600]	train's auc: 0.999997	valid's auc: 0.801749
+[1700]	train's auc: 0.999999	valid's auc: 0.802031
+[1800]	train's auc: 0.999999	valid's auc: 0.802921
+[1900]	train's auc: 1	valid's auc: 0.803477
+[2000]	train's auc: 1	valid's auc: 0.803799
+Did not meet early stopping. Best iteration is:
+[1952]	train's auc: 1	valid's auc: 0.803867
+Traceback (most recent call last):
+  File "/home/ai/NogutiAI/aiTrainCrypto/project/train_with_risk.py", line 2375, in <module>
+    main()
+  File "/home/ai/NogutiAI/aiTrainCrypto/project/train_with_risk.py", line 2369, in main
+    assessment = pipeline.run()
+  File "/home/ai/NogutiAI/aiTrainCrypto/project/train_with_risk.py", line 2299, in run
+    self.export_models()
+  File "/home/ai/NogutiAI/aiTrainCrypto/project/train_with_risk.py", line 2211, in export_models
+    with open(results_path, 'w') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/home/ai/NogutiAI/aiTrainCrypto/models/training_results_20260202_172117.json'
