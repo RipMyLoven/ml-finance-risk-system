@@ -1,0 +1,23 @@
+{
+  "cvar_confidence": 0.95,
+  "cvar_window": 252,
+  "kelly_base_fraction": 0.25,
+  "kelly_min": 0.01,
+  "kelly_max": 0.5,
+  "dd_warning": 0.05,
+  "dd_critical": 0.1,
+  "dd_emergency": 0.15,
+  "max_leverage": 10.0,
+  "max_position_pct": 0.25,
+  "statistics": {
+    "total_decisions": 0,
+    "approved": 0,
+    "rejected": 0,
+    "approval_rate": 0.0,
+    "risk_state": "ON",
+    "current_drawdown": 0.0,
+    "max_drawdown": 0.0,
+    "portfolio_cvar": 0.0,
+    "kill_switch_active": false
+  }
+}

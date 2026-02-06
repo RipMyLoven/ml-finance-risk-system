@@ -13,8 +13,12 @@
   - ONNX export for production deployment
   - Configurable CPU/RAM utilization via config.yaml
   
+  TRAINING MODES:
+  - local_debug: Fast runs for debugging on weak hardware (12GB RAM, few cores)
+  - server_production: Full runs on powerful servers (high RAM, all cores)
+  
   Author: AI Trading Systems
-  Version: 2.0.0 (Polars)
+  Version: 2.1.0 (Polars + Debug Mode)
   
 ================================================================================
 """
@@ -31,6 +35,7 @@ import warnings
 import hashlib
 import pickle
 import yaml
+import platform
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any, Union, Callable
@@ -44,8 +49,60 @@ warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # ==============================================================================
+# TRAINING MODE CONFIGURATION
+# ==============================================================================
+
+class TrainingMode(Enum):
+    """Training mode determines resource usage and data scope."""
+    LOCAL_DEBUG = "local_debug"       # Fast, low-resource, few symbols for debugging
+    SERVER_PRODUCTION = "server_production"  # Full data, max resources for production
+
+
+# Auto-detect mode based on system resources
+def detect_training_mode() -> TrainingMode:
+    """Auto-detect training mode based on available resources."""
+    try:
+        if platform.system() == 'Windows':
+            import psutil
+            total_ram_gb = psutil.virtual_memory().total / (1024**3)
+        else:
+            total_ram_gb = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024**3)
+        
+        cpu_count = mp.cpu_count()
+        
+        # If RAM < 20GB or < 8 cores, use debug mode
+        if total_ram_gb < 20 or cpu_count < 8:
+            return TrainingMode.LOCAL_DEBUG
+        return TrainingMode.SERVER_PRODUCTION
+    except:
+        return TrainingMode.LOCAL_DEBUG
+
+
+# Get system RAM in a cross-platform way
+def get_system_ram_gb() -> float:
+    """Get system RAM in GB, cross-platform."""
+    try:
+        if platform.system() == 'Windows':
+            import psutil
+            return psutil.virtual_memory().total / (1024**3)
+        else:
+            return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024**3)
+    except:
+        return 8.0  # Conservative default
+
+# ==============================================================================
 # LOAD CONFIG FIRST
 # ==============================================================================
+
+# Detect mode FIRST before loading config
+TRAINING_MODE = detect_training_mode()
+
+# Override via environment variable if set
+if os.environ.get('TRAINING_MODE', '').lower() == 'production':
+    TRAINING_MODE = TrainingMode.SERVER_PRODUCTION
+elif os.environ.get('TRAINING_MODE', '').lower() == 'debug':
+    TRAINING_MODE = TrainingMode.LOCAL_DEBUG
+
 
 def load_config() -> dict:
     """Load configuration from config.yaml."""
@@ -57,15 +114,69 @@ def load_config() -> dict:
 
 CONFIG = load_config()
 
-# Get CPU settings from config
-CPU_CONFIG = CONFIG.get('cpu', {})
-CPU_USAGE_PCT = CPU_CONFIG.get('usage_percent', 1.0)
-EXACT_CORES = CPU_CONFIG.get('exact_cores', None)
+# ==============================================================================
+# MODE-SPECIFIC CONFIGURATION OVERRIDES
+# ==============================================================================
 
-if EXACT_CORES:
-    N_CORES_TO_USE = int(EXACT_CORES)
+# DEBUG MODE OVERRIDES - These take precedence for local debugging
+DEBUG_OVERRIDES = {
+    'cpu': {
+        'usage_percent': 0.5,  # Use 50% of cores
+        'exact_cores': min(4, mp.cpu_count()),  # Max 4 cores for debug
+    },
+    'ram': {
+        'usage_percent': 0.7,  # 70% of RAM
+        'max_gb': 10,  # Hard cap at 10GB for 12GB machine
+    },
+    'lightgbm': {
+        'max_bin': 127,       # Reduced bins (less RAM)
+        'num_leaves': 31,     # Smaller trees (faster)
+        'max_depth': 6,       # Shallower (faster)
+        'num_boost_round': 200,  # Fewer rounds
+        'early_stopping_rounds': 30,
+        'min_data_in_leaf': 50,  # Higher min leaf (regularization)
+        'learning_rate': 0.1,    # Higher LR for faster convergence
+    },
+    'optuna': {
+        'n_trials': 3,  # Minimal trials for debugging
+    },
+    'debug': {
+        'symbols': ['BTCUSDT', 'ETHUSDT'],  # Only major pairs
+        'max_samples': 50000,  # Cap samples per model
+        'skip_swing': True,    # Skip swing model (uses 1d data, slow)
+    }
+}
+
+
+def get_effective_config(key: str, subkey: str = None, default=None):
+    """Get config value with debug overrides applied."""
+    if TRAINING_MODE == TrainingMode.LOCAL_DEBUG:
+        if subkey:
+            value = DEBUG_OVERRIDES.get(key, {}).get(subkey)
+            if value is not None:
+                return value
+        else:
+            value = DEBUG_OVERRIDES.get(key)
+            if value is not None:
+                return value
+    
+    # Fall back to config.yaml
+    if subkey:
+        return CONFIG.get(key, {}).get(subkey, default)
+    return CONFIG.get(key, default)
+
+
+# Get CPU settings with mode awareness
+CPU_CONFIG = CONFIG.get('cpu', {})
+if TRAINING_MODE == TrainingMode.LOCAL_DEBUG:
+    N_CORES_TO_USE = get_effective_config('cpu', 'exact_cores', 4)
 else:
-    N_CORES_TO_USE = max(1, int(mp.cpu_count() * CPU_USAGE_PCT))
+    CPU_USAGE_PCT = CPU_CONFIG.get('usage_percent', 1.0)
+    EXACT_CORES = CPU_CONFIG.get('exact_cores', None)
+    if EXACT_CORES:
+        N_CORES_TO_USE = int(EXACT_CORES)
+    else:
+        N_CORES_TO_USE = max(1, int(mp.cpu_count() * CPU_USAGE_PCT))
 
 N_CORES_TOTAL = mp.cpu_count()
 
@@ -75,18 +186,27 @@ os.environ['MKL_NUM_THREADS'] = str(N_CORES_TO_USE)
 os.environ['OPENBLAS_NUM_THREADS'] = str(N_CORES_TO_USE)
 os.environ['VECLIB_MAXIMUM_THREADS'] = str(N_CORES_TO_USE)
 os.environ['NUMEXPR_NUM_THREADS'] = str(N_CORES_TO_USE)
-os.environ['JOBLIB_TEMP_FOLDER'] = '/tmp/joblib'
+
+# Cross-platform temp folder
+if platform.system() == 'Windows':
+    os.environ['JOBLIB_TEMP_FOLDER'] = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'joblib')
+else:
+    os.environ['JOBLIB_TEMP_FOLDER'] = '/tmp/joblib'
+
 os.environ['LOKY_MAX_CPU_COUNT'] = str(N_CORES_TO_USE)
-os.environ['JOBLIB_START_METHOD'] = 'forkserver'
+if platform.system() != 'Windows':
+    os.environ['JOBLIB_START_METHOD'] = 'forkserver'  # Only on Unix
 os.environ['LGB_NUM_THREADS'] = str(N_CORES_TO_USE)
-# Polars uses all cores by default
 os.environ['POLARS_MAX_THREADS'] = str(N_CORES_TO_USE)
 
 import numpy as np
 import polars as pl
 
-# Configure Polars for maximum performance
-pl.Config.set_streaming_chunk_size(50_000_000)  # 50M rows per chunk for streaming
+# Configure Polars for performance (mode-aware)
+if TRAINING_MODE == TrainingMode.LOCAL_DEBUG:
+    pl.Config.set_streaming_chunk_size(1_000_000)  # 1M rows for debug
+else:
+    pl.Config.set_streaming_chunk_size(50_000_000)  # 50M rows for production
 pl.Config.set_fmt_str_lengths(100)
 
 from scipy import stats
@@ -121,72 +241,110 @@ from joblib import Parallel, delayed, Memory
 
 @dataclass
 class SystemConfig:
-    """Global system configuration loaded from config.yaml."""
+    """Global system configuration loaded from config.yaml with mode awareness."""
     
-    # CPU settings from config
+    # Training mode
+    training_mode: TrainingMode = field(default_factory=lambda: TRAINING_MODE)
+    
+    # CPU settings - mode-aware
     n_cpu: int = field(default_factory=lambda: N_CORES_TO_USE)
     n_cpu_total: int = field(default_factory=lambda: N_CORES_TOTAL)
     total_ram_gb: float = field(default_factory=lambda: min(
-        os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024**3),
-        CONFIG.get('ram', {}).get('max_gb', 9999)
+        get_system_ram_gb(),
+        get_effective_config('ram', 'max_gb', 9999)
     ))
     
     # Parallelization settings
     n_jobs: int = -1
     parallel_backend: str = 'loky'
     
-    # Resource usage from config
-    cpu_usage_pct: float = field(default_factory=lambda: CPU_USAGE_PCT)
-    ram_usage_pct: float = field(default_factory=lambda: CONFIG.get('ram', {}).get('usage_percent', 0.70))
-    ram_max_gb: float = field(default_factory=lambda: CONFIG.get('ram', {}).get('max_gb', None))
+    # Resource usage - mode-aware
+    cpu_usage_pct: float = field(default_factory=lambda: get_effective_config('cpu', 'usage_percent', 0.5))
+    ram_usage_pct: float = field(default_factory=lambda: get_effective_config('ram', 'usage_percent', 0.70))
+    ram_max_gb: float = field(default_factory=lambda: get_effective_config('ram', 'max_gb', 10))
     
-    # LightGBM settings from config
-    max_bin: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('max_bin', 512))
-    num_leaves: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('num_leaves', 255))
-    max_depth: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('max_depth', 15))
-    min_data_in_leaf: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('min_data_in_leaf', 10))
-    learning_rate: float = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('learning_rate', 0.03))
-    num_boost_round: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('num_boost_round', 2000))
-    early_stopping_rounds: int = field(default_factory=lambda: CONFIG.get('lightgbm', {}).get('early_stopping_rounds', 100))
+    # LightGBM settings - mode-aware
+    max_bin: int = field(default_factory=lambda: get_effective_config('lightgbm', 'max_bin', 127))
+    num_leaves: int = field(default_factory=lambda: get_effective_config('lightgbm', 'num_leaves', 31))
+    max_depth: int = field(default_factory=lambda: get_effective_config('lightgbm', 'max_depth', 6))
+    min_data_in_leaf: int = field(default_factory=lambda: get_effective_config('lightgbm', 'min_data_in_leaf', 50))
+    learning_rate: float = field(default_factory=lambda: get_effective_config('lightgbm', 'learning_rate', 0.1))
+    num_boost_round: int = field(default_factory=lambda: get_effective_config('lightgbm', 'num_boost_round', 200))
+    early_stopping_rounds: int = field(default_factory=lambda: get_effective_config('lightgbm', 'early_stopping_rounds', 30))
     feature_fraction_bynode: float = 0.9
     histogram_pool_size: int = -1
-    bin_construct_sample_cnt: int = 5000000
-    max_cached_hist_node: int = 65536
+    bin_construct_sample_cnt: int = field(default_factory=lambda: 100000 if TRAINING_MODE == TrainingMode.LOCAL_DEBUG else 5000000)
+    max_cached_hist_node: int = field(default_factory=lambda: 1024 if TRAINING_MODE == TrainingMode.LOCAL_DEBUG else 65536)
     
-    # Data paths from config
-    data_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('data', '/home/ai/NogutiAI/aiTrainCrypto/data'))
-    model_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('models', '/home/ai/NogutiAI/aiTrainCrypto/project/models'))
-    cache_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('cache', '/home/ai/NogutiAI/aiTrainCrypto/project/.cache'))
+    # Data paths - auto-detect from script location
+    data_path: str = field(default_factory=lambda: _get_default_data_path())
+    model_path: str = field(default_factory=lambda: _get_default_model_path())
+    cache_path: str = field(default_factory=lambda: _get_default_cache_path())
     
-    # Training settings from config
+    # Training settings
     random_seed: int = field(default_factory=lambda: CONFIG.get('misc', {}).get('random_seed', 42))
     test_size: float = field(default_factory=lambda: CONFIG.get('misc', {}).get('test_size', 0.20))
     val_size: float = field(default_factory=lambda: CONFIG.get('misc', {}).get('val_size', 0.10))
     
-    # Risk thresholds from config
+    # Risk thresholds
     max_leverage: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('max_leverage', 10.0))
     max_position_pct: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('max_position_pct', 0.25))
     max_drawdown_warning: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('drawdown_warning', 0.05))
     max_drawdown_critical: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('drawdown_critical', 0.10))
     max_drawdown_emergency: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('drawdown_emergency', 0.15))
     
-    # CVaR settings from config
+    # CVaR settings
     cvar_confidence: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('cvar_confidence', 0.95))
     cvar_window: int = field(default_factory=lambda: CONFIG.get('risk', {}).get('cvar_window', 252))
     cvar_max_threshold: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('cvar_max_threshold', 0.03))
     
-    # Kelly settings from config
+    # Kelly settings
     kelly_fraction: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('kelly_fraction', 0.25))
     kelly_min: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('kelly_min', 0.01))
     kelly_max: float = field(default_factory=lambda: CONFIG.get('risk', {}).get('kelly_max', 0.50))
     
-    # Optuna settings from config
-    optuna_n_trials: int = field(default_factory=lambda: CONFIG.get('optuna', {}).get('n_trials', 50))
+    # Optuna settings - mode-aware
+    optuna_n_trials: int = field(default_factory=lambda: get_effective_config('optuna', 'n_trials', 3))
+    
+    # Debug-specific settings
+    debug_symbols: List[str] = field(default_factory=lambda: get_effective_config('debug', 'symbols', ['BTCUSDT', 'ETHUSDT']))
+    debug_max_samples: int = field(default_factory=lambda: get_effective_config('debug', 'max_samples', 50000))
+    debug_skip_swing: bool = field(default_factory=lambda: get_effective_config('debug', 'skip_swing', True))
     
     def __post_init__(self):
         self.n_jobs = self.n_cpu if self.n_jobs == -1 else self.n_jobs
         os.makedirs(self.model_path, exist_ok=True)
         os.makedirs(self.cache_path, exist_ok=True)
+        
+    def is_debug_mode(self) -> bool:
+        return self.training_mode == TrainingMode.LOCAL_DEBUG
+
+
+def _get_default_data_path() -> str:
+    """Get default data path relative to script location."""
+    script_dir = Path(__file__).parent
+    # Try relative path first (project/.. -> aiTrainCrypto)
+    data_path = script_dir.parent / 'data'
+    if data_path.exists():
+        return str(data_path)
+    # Fall back to config
+    return CONFIG.get('paths', {}).get('data', str(script_dir.parent / 'data'))
+
+
+def _get_default_model_path() -> str:
+    """Get default model path relative to script location."""
+    script_dir = Path(__file__).parent
+    model_path = script_dir / 'models'
+    model_path.mkdir(parents=True, exist_ok=True)
+    return str(model_path)
+
+
+def _get_default_cache_path() -> str:
+    """Get default cache path relative to script location."""
+    script_dir = Path(__file__).parent
+    cache_path = script_dir / '.cache'
+    cache_path.mkdir(parents=True, exist_ok=True)
+    return str(cache_path)
 
 
 # ==============================================================================
@@ -956,6 +1114,12 @@ class PolarsDataLoader:
             if len(parts) >= 4:
                 symbol = '_'.join(parts[3:-1]) if len(parts) > 4 else parts[3]
                 symbols.add(symbol)
+        
+        # DEBUG MODE: Filter to only configured symbols
+        if self.config.is_debug_mode():
+            debug_symbols = self.config.debug_symbols
+            symbols = {s for s in symbols if s in debug_symbols}
+            self.logger.info(f"DEBUG MODE: Filtering to {len(symbols)} symbols: {sorted(symbols)}")
                 
         self.symbols = sorted(list(symbols))
         self.logger.info(f"Discovered {len(self.symbols)} symbols")
@@ -1075,14 +1239,29 @@ class PolarsDataLoader:
             'total_rows': total_rows
         }
     
-    def get_training_data(self, model_type: ModelType) -> Tuple[np.ndarray, np.ndarray]:
-        """Get prepared training data for specific model type."""
+    def get_training_data(self, model_type: ModelType) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Get prepared training data for specific model type.
+        
+        Returns:
+            X: Feature matrix
+            y: 3-class target (0=Down, 1=Flat, 2=Up)
+            returns: Raw future returns for risk calculations
+        """
         timeframe_map = {
             ModelType.SCALP: '5m',
             ModelType.INTRADAY: '1h',
             ModelType.SWING: '1d'
         }
         primary_tf = timeframe_map.get(model_type, '1h')
+        
+        # Thresholds for 3-class classification (adjusted by model type)
+        # More aggressive thresholds = stronger signal-to-noise
+        threshold_map = {
+            ModelType.SCALP: 0.001,    # 0.1% for scalp (tight)
+            ModelType.INTRADAY: 0.005, # 0.5% for intraday
+            ModelType.SWING: 0.02,     # 2% for swing (wider)
+        }
+        flat_threshold = threshold_map.get(model_type, 0.005)
         
         all_dfs = []
         
@@ -1097,12 +1276,12 @@ class PolarsDataLoader:
             all_dfs.append(lf)
             
         if not all_dfs:
-            return np.array([]), np.array([])
+            return np.array([]), np.array([]), np.array([])
         
         # Concatenate all LazyFrames and collect
         combined = pl.concat(all_dfs)
         
-        # Add target column
+        # Add future return column (shift -1 to look at next candle)
         combined = combined.with_columns([
             (pl.col('close').shift(-1) / pl.col('close') - 1).over('symbol').alias('future_return')
         ])
@@ -1110,24 +1289,40 @@ class PolarsDataLoader:
         # Collect and convert to numpy
         df = combined.collect()
         
-        # Drop NA and create target
+        # Drop NA rows where future_return couldn't be computed
         df = df.drop_nulls(subset=['future_return'])
+        
+        # 3-CLASS TARGET: Down=0, Flat=1, Up=2
+        # Using when/then/otherwise for proper 3-class
         df = df.with_columns([
-            (pl.col('future_return') > 0).cast(pl.Int32).alias('target')
+            pl.when(pl.col('future_return') < -flat_threshold)
+              .then(pl.lit(0))  # DOWN
+              .when(pl.col('future_return') > flat_threshold)
+              .then(pl.lit(2))  # UP
+              .otherwise(pl.lit(1))  # FLAT
+              .cast(pl.Int32)
+              .alias('target')
         ])
         
-        # Get feature columns
+        # Get feature columns (exclude non-feature columns)
         exclude_cols = ['symbol', 'open_time', 'timestamp', 'future_return', 'target', 
                        'interval', 'market_type', 'close_time']
         feature_cols = [c for c in df.columns if c not in exclude_cols]
         
         X = df.select(feature_cols).to_numpy().astype(np.float32)
         y = df.select('target').to_numpy().flatten()
+        returns = df.select('future_return').to_numpy().flatten().astype(np.float32)
         
         # Handle NaN/Inf
         X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
         
-        return X, y
+        # Log class distribution
+        unique, counts = np.unique(y, return_counts=True)
+        self.logger.info(f"  Target distribution: Down={counts[0] if 0 in unique else 0}, "
+                        f"Flat={counts[1] if 1 in unique else 0}, Up={counts[2] if 2 in unique else 0}")
+        
+        return X, y, returns
 
 
 # ==============================================================================
@@ -1419,16 +1614,22 @@ class BaseTradingModel:
 
 
 class LightGBMTradingModel(BaseTradingModel):
-    """LightGBM-based trading model - MAXIMUM PERFORMANCE."""
+    """LightGBM-based trading model - 3-CLASS MULTICLASS (Down/Flat/Up)."""
     
     def __init__(self, model_type: ModelType, config: SystemConfig, logger: RiskLogger):
         super().__init__(model_type, config, logger)
         
-        available_ram_mb = int(config.total_ram_gb * 1024 * 0.7)
+        # Cap RAM usage based on mode
+        if config.is_debug_mode():
+            available_ram_mb = min(int(config.total_ram_gb * 1024 * 0.5), 4096)  # Max 4GB for debug
+        else:
+            available_ram_mb = int(config.total_ram_gb * 1024 * 0.7)
         
+        # 3-CLASS MULTICLASS configuration
         self.lgb_params = {
-            'objective': 'binary',
-            'metric': 'auc',
+            'objective': 'multiclass',
+            'num_class': 3,  # Down=0, Flat=1, Up=2
+            'metric': 'multi_logloss',
             'boosting_type': 'gbdt',
             'num_leaves': config.num_leaves,
             'max_depth': config.max_depth,
@@ -1449,6 +1650,8 @@ class LightGBMTradingModel(BaseTradingModel):
             'feature_fraction_bynode': config.feature_fraction_bynode,
             'bin_construct_sample_cnt': config.bin_construct_sample_cnt,
             'max_cached_hist_node': config.max_cached_hist_node,
+            # Class weight balancing for imbalanced classes
+            'is_unbalance': True,
         }
         
     def train(self, X: np.ndarray, y: np.ndarray, params: Dict = None):
@@ -1516,10 +1719,21 @@ class LightGBMTradingModel(BaseTradingModel):
             self.logger.info(f"  Best iteration: {self.model.best_iteration}")
             
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Predict probabilities."""
+        """Predict class probabilities for 3-class classification.
+        
+        Returns:
+            Array of shape (n_samples, 3) with probabilities for each class.
+        """
         if self.model is None:
             raise ValueError("Model not trained")
-        return self.model.predict(X, num_iteration=self.model.best_iteration)
+        probs = self.model.predict(X, num_iteration=self.model.best_iteration)
+        # LightGBM multiclass returns (n_samples, num_class) directly
+        return probs
+    
+    def predict_class(self, X: np.ndarray) -> np.ndarray:
+        """Predict class labels (0=Down, 1=Flat, 2=Up)."""
+        probs = self.predict_proba(X)
+        return np.argmax(probs, axis=1)
     
     def get_feature_importance(self) -> Dict[str, float]:
         """Get feature importance."""
@@ -1870,23 +2084,28 @@ class ProductionTrainingPipeline:
     def print_header(self):
         """Print system header with config info."""
         config_path = Path(__file__).parent / 'config.yaml'
-        config_status = "✓ Loaded" if config_path.exists() else "✗ Not found (using defaults)"
+        config_status = "Loaded" if config_path.exists() else "Not found (using defaults)"
+        
+        mode_str = "LOCAL DEBUG" if self.config.is_debug_mode() else "SERVER PRODUCTION"
+        mode_color = "[FAST]" if self.config.is_debug_mode() else "[FULL]"
         
         print("=" * 80)
         print("  PRODUCTION-GRADE MULTI-MODEL FUTURES TRADING SYSTEM")
         print("  POLARS VERSION - High-Performance Parallel Processing")
-        print("  Configure via: project/config.yaml")
         print("=" * 80)
+        print(f"  TRAINING MODE: {mode_str} {mode_color}")
+        print("-" * 80)
         print(f"  Config: {config_status}")
-        print(f"  CPU Cores: {self.config.n_cpu}/{self.config.n_cpu_total} ({self.config.cpu_usage_pct*100:.0f}%)")
-        ram_limit_str = f", max={self.config.ram_max_gb:.0f}GB" if self.config.ram_max_gb else ""
-        usable_ram = self.config.total_ram_gb * self.config.ram_usage_pct
-        print(f"  RAM: {self.config.total_ram_gb:.1f} GB × {self.config.ram_usage_pct*100:.0f}% = {usable_ram:.1f} GB{ram_limit_str}")
-        print(f"  Workers: {self.config.n_jobs}")
-        print(f"  LightGBM: max_bin={self.config.max_bin}, leaves={self.config.num_leaves}, lr={self.config.learning_rate}")
-        print(f"  Optuna: {'Yes' if OPTUNA_AVAILABLE else 'No'} ({self.config.optuna_n_trials} trials) | ONNX: {'Yes' if ONNX_AVAILABLE else 'No'}")
-        print("=" * 80)
-        print(f"  Edit config.yaml to change CPU/RAM usage, LightGBM params, etc.")
+        print(f"  CPU Cores: {self.config.n_cpu}/{self.config.n_cpu_total}")
+        print(f"  RAM: {self.config.total_ram_gb:.1f} GB (max: {self.config.ram_max_gb:.0f} GB)")
+        print(f"  LightGBM: max_bin={self.config.max_bin}, leaves={self.config.num_leaves}, "
+              f"depth={self.config.max_depth}, lr={self.config.learning_rate}")
+        print(f"  Optuna: {'Yes' if OPTUNA_AVAILABLE and not self.config.is_debug_mode() else 'Skip'} "
+              f"({self.config.optuna_n_trials} trials) | ONNX: {'Yes' if ONNX_AVAILABLE else 'No'}")
+        if self.config.is_debug_mode():
+            print("-" * 80)
+            print(f"  DEBUG: Symbols={self.config.debug_symbols}, MaxSamples={self.config.debug_max_samples:,}")
+            print(f"  DEBUG: SkipSwing={self.config.debug_skip_swing}")
         print("=" * 80)
         print()
         
@@ -1924,14 +2143,29 @@ class ProductionTrainingPipeline:
         
         return self.features
     
-    def _get_training_data_with_features(self, model_type: ModelType) -> Tuple[np.ndarray, np.ndarray, List[str]]:
-        """Get training data with ALL generated features using Polars."""
+    def _get_training_data_with_features(self, model_type: ModelType) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
+        """Get training data with ALL generated features using Polars.
+        
+        Returns:
+            X: Feature matrix
+            y: 3-class target (0=Down, 1=Flat, 2=Up)
+            returns: Raw future returns for risk calculations
+            feature_cols: List of feature column names
+        """
         timeframe_map = {
             ModelType.SCALP: '5m',
             ModelType.INTRADAY: '1h',
             ModelType.SWING: '1d'
         }
         primary_tf = timeframe_map.get(model_type, '1h')
+        
+        # Thresholds for 3-class classification
+        threshold_map = {
+            ModelType.SCALP: 0.001,    # 0.1% for scalp
+            ModelType.INTRADAY: 0.005, # 0.5% for intraday
+            ModelType.SWING: 0.02,     # 2% for swing
+        }
+        flat_threshold = threshold_map.get(model_type, 0.005)
         
         all_lfs = []
         symbols_processed = []
@@ -1948,42 +2182,35 @@ class ProductionTrainingPipeline:
             symbols_processed.append(symbol)
             
         if not all_lfs:
-            return np.array([]), np.array([]), []
+            return np.array([]), np.array([]), np.array([]), []
         
         self.logger.info(f"  Collecting {len(all_lfs)} symbols with Polars...")
         
-        # Normalize schemas before concat - cast columns to consistent types
-        # This handles differences like Int64 vs Float64 for volume columns
+        # Normalize schemas before concat
         normalized_lfs = []
         for lf in all_lfs:
-            # Cast numeric columns to Float64 for consistency
             cast_exprs = []
             for col_name in lf.columns:
-                # Skip string columns
                 if col_name in ['symbol', 'interval', 'market_type']:
                     continue
-                # Cast all numeric types to Float64
                 cast_exprs.append(pl.col(col_name).cast(pl.Float64, strict=False))
             
             if cast_exprs:
                 lf = lf.with_columns(cast_exprs)
             
-            # Drop columns that may not exist in all files
             cols_to_drop = [c for c in ['market_type', 'ignore'] if c in lf.columns]
             if cols_to_drop:
                 lf = lf.drop(cols_to_drop)
                 
             normalized_lfs.append(lf)
         
-        # Concatenate all LazyFrames with diagonal concat to handle schema differences
         combined = pl.concat(normalized_lfs, how='diagonal_relaxed')
         
-        # Add target column
+        # Add future return column
         combined = combined.with_columns([
             (pl.col('close').shift(-1) / pl.col('close') - 1).over('symbol').alias('future_return')
         ])
         
-        # Collect (this is where Polars uses all cores)
         self.logger.info("  Collecting data (Polars parallel)...")
         df = combined.collect()
         
@@ -1993,17 +2220,28 @@ class ProductionTrainingPipeline:
                 del self.features[symbol][primary_tf]
         gc.collect()
         
-        # Drop NA and create target
+        # Drop NA
         df = df.drop_nulls(subset=['future_return'])
+        
+        # 3-CLASS TARGET: Down=0, Flat=1, Up=2
         df = df.with_columns([
-            (pl.col('future_return') > 0).cast(pl.Int32).alias('target')
+            pl.when(pl.col('future_return') < -flat_threshold)
+              .then(pl.lit(0))  # DOWN
+              .when(pl.col('future_return') > flat_threshold)
+              .then(pl.lit(2))  # UP
+              .otherwise(pl.lit(1))  # FLAT
+              .cast(pl.Int32)
+              .alias('target')
         ])
         
-        # Smart sampling if too many rows (LightGBM is slow with >10M rows)
-        max_samples = 10_000_000  # 10M rows max for efficient training
+        # MODE-AWARE SAMPLING
+        if self.config.is_debug_mode():
+            max_samples = self.config.debug_max_samples
+        else:
+            max_samples = 10_000_000
+            
         if len(df) > max_samples:
-            self.logger.info(f"  Sampling {max_samples:,} from {len(df):,} rows for efficient training...")
-            # Stratified-like sampling: sample from each symbol proportionally
+            self.logger.info(f"  Sampling {max_samples:,} from {len(df):,} rows...")
             df = df.sample(n=max_samples, seed=42, shuffle=True)
         
         # Get feature columns
@@ -2011,42 +2249,58 @@ class ProductionTrainingPipeline:
                        'interval', 'market_type', 'close_time', 'quote_volume', 
                        'count', 'taker_buy_volume', 'taker_buy_quote_volume', 'ignore']
         
-        feature_cols = [c for c in df.columns if c not in exclude_cols and df[c].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]]
+        feature_cols = [c for c in df.columns if c not in exclude_cols 
+                       and df[c].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]]
         
         self.logger.info(f"  Converting to numpy ({len(feature_cols)} features)...")
         
-        # Convert to numpy efficiently - cast to Float32 in Polars first to avoid double copy
-        # Use rechunk for better memory layout
         X_df = df.select([pl.col(c).cast(pl.Float32) for c in feature_cols]).rechunk()
         X = X_df.to_numpy()
         del X_df
         
         y = df.select('target').to_numpy().flatten().astype(np.int32)
+        returns = df.select('future_return').to_numpy().flatten().astype(np.float32)
         
         # Handle NaN/Inf
         X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
         
-        # Free DataFrame
+        # Log class distribution
+        unique, counts = np.unique(y, return_counts=True)
+        dist_str = ", ".join([f"Class {u}={c}" for u, c in zip(unique, counts)])
+        self.logger.info(f"  Class distribution: {dist_str}")
+        
         del df
         gc.collect()
         
         self.logger.info(f"  Data ready: {X.shape[0]:,} samples, {X.shape[1]} features")
         
-        return X, y, feature_cols
+        return X, y, returns, feature_cols
         
     def train_trading_models(self):
-        """Train all trading models with Polars-generated features."""
+        """Train all trading models with Polars-generated features.
+        
+        Uses TimeSeriesSplit for proper time-series validation (no data leakage).
+        Trains 3-class multiclass models (Down=0, Flat=1, Up=2).
+        """
         self.logger.info("=" * 60)
         self.logger.info("PHASE 3: TRADING MODEL TRAINING")
+        self.logger.info(f"  Mode: {self.config.training_mode.value}")
         self.logger.info("=" * 60)
         
         results = {}
+        models_to_train = [ModelType.SCALP, ModelType.INTRADAY, ModelType.SWING]
         
-        for model_type in [ModelType.SCALP, ModelType.INTRADAY, ModelType.SWING]:
+        # DEBUG MODE: Skip swing model (slow due to 1d data)
+        if self.config.is_debug_mode() and self.config.debug_skip_swing:
+            models_to_train = [ModelType.SCALP, ModelType.INTRADAY]
+            self.logger.info("DEBUG MODE: Skipping SWING model")
+        
+        for model_type in models_to_train:
             self.logger.info(f"\nTraining {model_type.value.upper()} model...")
             
-            # Get training data with ALL features
-            X, y, feature_names = self._get_training_data_with_features(model_type)
+            # Get training data with features (now returns X, y, returns, feature_names)
+            X, y, returns, feature_names = self._get_training_data_with_features(model_type)
             
             if len(X) == 0:
                 self.logger.warning(f"No data for {model_type.value}")
@@ -2057,10 +2311,20 @@ class ProductionTrainingPipeline:
             self.logger.info(f"  Data: {len(X):,} samples, {len(feature_names)} features")
             self.logger.info(f"  Feature matrix RAM: {ram_usage_gb:.2f} GB")
             
-            # Split data
-            split_idx = int(len(X) * (1 - self.config.test_size))
-            X_train, X_test = X[:split_idx], X[split_idx:]
-            y_train, y_test = y[:split_idx], y[split_idx:]
+            # ================================================================
+            # PROPER TIME-SERIES SPLIT (NO DATA LEAKAGE)
+            # ================================================================
+            # Use TimeSeriesSplit for proper chronological validation
+            n_splits = 3 if self.config.is_debug_mode() else 5
+            tscv = TimeSeriesSplit(n_splits=n_splits, test_size=int(len(X) * self.config.test_size))
+            
+            # Use the last split for train/test
+            for train_idx, test_idx in tscv.split(X):
+                X_train, X_test = X[train_idx], X[test_idx]
+                y_train, y_test = y[train_idx], y[test_idx]
+                returns_test = returns[test_idx]
+            
+            self.logger.info(f"  TimeSeriesSplit: {len(X_train):,} train, {len(X_test):,} test")
             
             # Create and train model
             model = LightGBMTradingModel(model_type, self.config, self.logger)
@@ -2068,22 +2332,48 @@ class ProductionTrainingPipeline:
             
             model.train(X_train_scaled, y_train_arr)
             
-            # Evaluate
+            # ================================================================
+            # MULTICLASS EVALUATION
+            # ================================================================
             X_test_scaled = model.scaler.transform(X_test)
-            y_pred = model.predict_proba(X_test_scaled)
+            y_pred_proba = model.predict_proba(X_test_scaled)
+            y_pred = model.predict_class(X_test_scaled)
             
+            # Compute multiclass metrics
             try:
-                auc = roc_auc_score(y_test, y_pred)
-            except:
+                # OvR AUC for multiclass
+                auc = roc_auc_score(y_test, y_pred_proba, multi_class='ovr', average='weighted')
+            except Exception as e:
+                self.logger.warning(f"  AUC computation failed: {e}")
                 auc = 0.5
+            
+            # Accuracy
+            accuracy = np.mean(y_pred == y_test)
+            
+            # Class-wise accuracy
+            class_names = ['Down', 'Flat', 'Up']
+            for cls_idx, cls_name in enumerate(class_names):
+                cls_mask = y_test == cls_idx
+                if np.sum(cls_mask) > 0:
+                    cls_acc = np.mean(y_pred[cls_mask] == cls_idx)
+                    self.logger.info(f"  {cls_name} accuracy: {cls_acc:.2%}")
                 
-            self.logger.info(f"  AUC: {auc:.4f}")
+            self.logger.info(f"  Overall Accuracy: {accuracy:.4f}")
+            self.logger.info(f"  Weighted AUC: {auc:.4f}")
             
             self.models[model_type] = model
-            results[model_type.value] = {'auc': auc, 'samples': len(X)}
+            results[model_type.value] = {
+                'auc': auc, 
+                'accuracy': accuracy,
+                'samples': len(X),
+                'n_features': len(feature_names)
+            }
+            
+            # Store returns for risk model
+            self._last_returns = returns_test
             
             # FREE MEMORY after each model
-            del X, y, X_train, X_test, y_train, y_test, X_train_scaled
+            del X, y, returns, X_train, X_test, y_train, y_test, X_train_scaled
             gc.collect()
             self.logger.info(f"  Memory freed after {model_type.value} training.")
             
@@ -2091,55 +2381,70 @@ class ProductionTrainingPipeline:
         return results
         
     def train_risk_model(self):
-        """Train the Risk Model with multi-objective optimization."""
+        """Train the Risk Model with multi-objective optimization.
+        
+        Uses actual returns from data (not random!) for proper risk calculation.
+        Uses TimeSeriesSplit for validation.
+        """
         self.logger.info("=" * 60)
         self.logger.info("PHASE 4: RISK MODEL TRAINING")
         self.logger.info("=" * 60)
         
-        # Get combined data for risk training
-        X, y, feature_names = self._get_training_data_with_features(ModelType.INTRADAY)
+        # Get combined data for risk training (now returns X, y, returns, feature_names)
+        X, y, returns, feature_names = self._get_training_data_with_features(ModelType.INTRADAY)
         
         if len(X) == 0:
             self.logger.error("No data available for risk model training")
             return {}
         
         self.logger.info(f"Risk model data: {len(X):,} samples")
-        
-        # Compute returns from close prices
-        # For now use random returns as placeholder (close prices are transformed)
-        returns = np.random.randn(len(X)) * 0.01  # Placeholder
+        self.logger.info(f"Returns stats: mean={returns.mean():.4%}, std={returns.std():.4%}, "
+                        f"min={returns.min():.4%}, max={returns.max():.4%}")
         
         # Create risk model
         self.risk_model = RiskModel(self.config, self.logger)
         
-        # Compute risk labels
+        # Compute risk labels from ACTUAL returns
         y_risk = self.risk_model.compute_risk_labels(returns)
         
         self.logger.info(f"Risk events: {y_risk.sum():,} ({y_risk.mean()*100:.1f}%)")
         
-        # Split data
-        split_train = int(len(X) * 0.7)
-        split_val = int(len(X) * 0.85)
+        # ================================================================
+        # PROPER TIME-SERIES SPLIT (NO DATA LEAKAGE)
+        # ================================================================
+        n_splits = 2 if self.config.is_debug_mode() else 3
+        tscv = TimeSeriesSplit(n_splits=n_splits)
         
-        X_train = X[:split_train]
-        X_val = X[split_train:split_val]
-        X_test = X[split_val:]
+        # Get splits
+        splits = list(tscv.split(X))
+        train_idx, test_idx = splits[-1]  # Use last split
         
-        y_train = y_risk[:split_train]
-        y_val = y_risk[split_train:split_val]
-        y_test = y_risk[split_val:]
+        # Further split train into train/val
+        val_split_idx = int(len(train_idx) * 0.85)
+        val_idx = train_idx[val_split_idx:]
+        train_idx_final = train_idx[:val_split_idx]
         
-        returns_train = returns[:split_train]
-        returns_val = returns[split_train:split_val]
-        returns_test = returns[split_val:]
+        X_train = X[train_idx_final]
+        X_val = X[val_idx]
+        X_test = X[test_idx]
+        
+        y_train = y_risk[train_idx_final]
+        y_val = y_risk[val_idx]
+        y_test = y_risk[test_idx]
+        
+        returns_train = returns[train_idx_final]
+        returns_val = returns[val_idx]
+        returns_test = returns[test_idx]
+        
+        self.logger.info(f"Split sizes: train={len(X_train):,}, val={len(X_val):,}, test={len(X_test):,}")
         
         # Prepare data
         X_train_scaled, y_train_arr = self.risk_model.prepare_data(X_train, y_train, feature_names)
         X_val_scaled = self.risk_model.scaler.transform(X_val)
         X_test_scaled = self.risk_model.scaler.transform(X_test)
         
-        # Optuna optimization
-        if OPTUNA_AVAILABLE:
+        # Optuna optimization (skip in debug mode or if not available)
+        if OPTUNA_AVAILABLE and not self.config.is_debug_mode():
             self.logger.info("\nStarting Optuna multi-objective optimization...")
             best_params = self.optimizer.optimize(
                 X_train_scaled, y_train_arr,
@@ -2321,54 +2626,96 @@ class ProductionTrainingPipeline:
 # ==============================================================================
 
 def main():
-    """Main entry point."""
+    """Main entry point with debug/production mode support."""
+    global TRAINING_MODE
     import argparse
     
     parser = argparse.ArgumentParser(
-        description='Production-grade Multi-Model Futures Trading System with Risk Engine (Polars)'
+        description='AI Crypto Trading System - Multi-Model Futures with Risk Engine',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+TRAINING MODES:
+  --debug       Fast local debugging: few symbols, low resources, quick validation
+  --production  Full server training: all symbols, max resources, Optuna optimization
+
+EXAMPLES:
+  python train_with_risk.py --debug                    # Fast local test
+  python train_with_risk.py --production              # Full server training
+  python train_with_risk.py --debug --symbols BTC ETH # Custom debug symbols
+        """
     )
-    parser.add_argument('--data-path', type=str, 
-                       default='/home/ai/NogutiAI/aiTrainCrypto/data',
-                       help='Path to data directory')
-    parser.add_argument('--model-path', type=str,
-                       default='/home/ai/NogutiAI/aiTrainCrypto/models',
-                       help='Path to save models')
-    parser.add_argument('--n-trials', '--trials', type=int, default=None,
-                       help='Number of Optuna trials')
-    parser.add_argument('--fast', action='store_true',
-                       help='Fast mode with reduced trials')
-    parser.add_argument('--cpu', type=float, default=None,
-                       help='CPU usage percent (0.1-1.0), overrides config.yaml')
+    
+    # Mode selection (mutually exclusive)
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument('--debug', action='store_true',
+                           help='Local debug mode (fast, low resources, few symbols)')
+    mode_group.add_argument('--production', action='store_true',
+                           help='Server production mode (full data, max resources)')
+    
+    # Paths
+    parser.add_argument('--data-path', type=str, default=None,
+                       help='Path to data directory (auto-detected if not set)')
+    parser.add_argument('--model-path', type=str, default=None,
+                       help='Path to save models (auto-detected if not set)')
+    
+    # Debug options
+    parser.add_argument('--symbols', nargs='+', default=None,
+                       help='Symbols to train on (debug mode, e.g., BTCUSDT ETHUSDT)')
+    parser.add_argument('--max-samples', type=int, default=None,
+                       help='Maximum samples per model (debug mode)')
+    
+    # Resource options
     parser.add_argument('--cores', type=int, default=None,
-                       help='Exact number of CPU cores to use, overrides config.yaml')
+                       help='Exact number of CPU cores to use')
+    parser.add_argument('--trials', type=int, default=None,
+                       help='Number of Optuna trials (0 to disable)')
     
     args = parser.parse_args()
     
-    # Create config
-    config = SystemConfig()
-    config.data_path = args.data_path
-    config.model_path = args.model_path
+    # Set training mode from arguments
+    if args.debug:
+        TRAINING_MODE = TrainingMode.LOCAL_DEBUG
+        os.environ['TRAINING_MODE'] = 'debug'
+    elif args.production:
+        TRAINING_MODE = TrainingMode.SERVER_PRODUCTION
+        os.environ['TRAINING_MODE'] = 'production'
+    # else: use auto-detected mode (already set)
     
-    # Override CPU settings from command line
+    # Create config (will use the updated TRAINING_MODE)
+    config = SystemConfig()
+    
+    # Override paths if provided
+    if args.data_path:
+        config.data_path = args.data_path
+    if args.model_path:
+        config.model_path = args.model_path
+        
+    # Override debug settings
+    if args.symbols:
+        config.debug_symbols = args.symbols
+    if args.max_samples:
+        config.debug_max_samples = args.max_samples
+        
+    # Override resource settings
     if args.cores:
         config.n_cpu = args.cores
         config.n_jobs = args.cores
-    elif args.cpu:
-        config.n_cpu = max(1, int(mp.cpu_count() * args.cpu))
-        config.n_jobs = config.n_cpu
-    
-    # Override Optuna trials
-    if args.n_trials:
-        config.optuna_n_trials = args.n_trials
-    
-    if args.fast:
-        config.optuna_n_trials = min(10, config.optuna_n_trials)
+    if args.trials is not None:
+        config.optuna_n_trials = args.trials
         
     # Run pipeline
-    pipeline = ProductionTrainingPipeline(config)
-    assessment = pipeline.run()
-    
-    return assessment
+    try:
+        pipeline = ProductionTrainingPipeline(config)
+        assessment = pipeline.run()
+        return assessment
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user.")
+        return None
+    except Exception as e:
+        print(f"\nTraining failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 if __name__ == '__main__':
