@@ -2627,6 +2627,10 @@ class ProductionTrainingPipeline:
 
 def main():
     """Main entry point with debug/production mode support."""
+    print("=" * 60, flush=True)
+    print("STARTING AI CRYPTO TRADING SYSTEM", flush=True)
+    print("=" * 60, flush=True)
+    
     global TRAINING_MODE
     import argparse
     
