@@ -1075,8 +1075,14 @@ class PolarsDataLoader:
             'total_rows': total_rows
         }
     
-    def get_training_data(self, model_type: ModelType) -> Tuple[np.ndarray, np.ndarray]:
-        """Get prepared training data for specific model type."""
+    def get_training_data(self, model_type: ModelType) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Get prepared training data for specific model type.
+        
+        Returns:
+            X: Feature matrix
+            y: Target labels (0=Down, 1=Flat, 2=Up)
+            returns: Actual future returns
+        """
         timeframe_map = {
             ModelType.SCALP: '5m',
             ModelType.INTRADAY: '1h',
@@ -1110,10 +1116,16 @@ class PolarsDataLoader:
         # Collect and convert to numpy
         df = combined.collect()
         
-        # Drop NA and create target
+        # Drop NA and create 3-class target: 0=Down, 1=Flat, 2=Up
+        flat_threshold = 0.002  # 0.2%
         df = df.drop_nulls(subset=['future_return'])
         df = df.with_columns([
-            (pl.col('future_return') > 0).cast(pl.Int32).alias('target')
+            pl.when(pl.col('future_return') < -flat_threshold)
+              .then(pl.lit(0))  # Down
+              .when(pl.col('future_return') > flat_threshold)
+              .then(pl.lit(2))  # Up
+              .otherwise(pl.lit(1))  # Flat
+              .cast(pl.Int32).alias('target')
         ])
         
         # Get feature columns
@@ -1123,11 +1135,13 @@ class PolarsDataLoader:
         
         X = df.select(feature_cols).to_numpy().astype(np.float32)
         y = df.select('target').to_numpy().flatten()
+        returns = df.select('future_return').to_numpy().flatten().astype(np.float32)
         
         # Handle NaN/Inf
         X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
         
-        return X, y
+        return X, y, returns
 
 
 # ==============================================================================
@@ -1516,10 +1530,19 @@ class LightGBMTradingModel(BaseTradingModel):
             self.logger.info(f"  Best iteration: {self.model.best_iteration}")
             
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Predict probabilities."""
+        """Predict probabilities for all 3 classes.
+        
+        Returns:
+            Array of shape (n_samples, 3) with probabilities for [Down, Flat, Up]
+        """
         if self.model is None:
             raise ValueError("Model not trained")
         return self.model.predict(X, num_iteration=self.model.best_iteration)
+    
+    def predict_class(self, X: np.ndarray) -> np.ndarray:
+        """Predict class labels (0=Down, 1=Flat, 2=Up)."""
+        proba = self.predict_proba(X)
+        return np.argmax(proba, axis=1)
     
     def get_feature_importance(self) -> Dict[str, float]:
         """Get feature importance."""
@@ -1924,8 +1947,22 @@ class ProductionTrainingPipeline:
         
         return self.features
     
-    def _get_training_data_with_features(self, model_type: ModelType) -> Tuple[np.ndarray, np.ndarray, List[str]]:
-        """Get training data with ALL generated features using Polars."""
+    def _get_training_data_with_features(self, model_type: ModelType) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
+        """Get training data with ALL generated features using Polars.
+        
+        Returns:
+            X: Feature matrix
+            y: Target labels (0=Down, 1=Flat, 2=Up)
+            returns: Actual future returns for risk calculations
+            feature_cols: List of feature column names
+        """
+        # Threshold for 3-class classification (varies by model type)
+        flat_threshold = {
+            ModelType.SCALP: 0.001,    # 0.1% for scalp
+            ModelType.INTRADAY: 0.002,  # 0.2% for intraday
+            ModelType.SWING: 0.005      # 0.5% for swing
+        }.get(model_type, 0.002)
+        
         timeframe_map = {
             ModelType.SCALP: '5m',
             ModelType.INTRADAY: '1h',
@@ -2023,16 +2060,25 @@ class ProductionTrainingPipeline:
         
         y = df.select('target').to_numpy().flatten().astype(np.int32)
         
+        # Extract actual returns for risk model
+        returns = df.select('future_return').to_numpy().flatten().astype(np.float32)
+        
         # Handle NaN/Inf
         X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
         
         # Free DataFrame
         del df
         gc.collect()
         
+        # Log class distribution
+        down_pct = (y == 0).mean() * 100
+        flat_pct = (y == 1).mean() * 100
+        up_pct = (y == 2).mean() * 100
         self.logger.info(f"  Data ready: {X.shape[0]:,} samples, {X.shape[1]} features")
+        self.logger.info(f"  Class distribution: Down={down_pct:.1f}%, Flat={flat_pct:.1f}%, Up={up_pct:.1f}%")
         
-        return X, y, feature_cols
+        return X, y, returns, feature_cols
         
     def train_trading_models(self):
         """Train all trading models with Polars-generated features."""
@@ -2045,8 +2091,8 @@ class ProductionTrainingPipeline:
         for model_type in [ModelType.SCALP, ModelType.INTRADAY, ModelType.SWING]:
             self.logger.info(f"\nTraining {model_type.value.upper()} model...")
             
-            # Get training data with ALL features
-            X, y, feature_names = self._get_training_data_with_features(model_type)
+            # Get training data with ALL features (now returns 4 values)
+            X, y, returns, feature_names = self._get_training_data_with_features(model_type)
             
             if len(X) == 0:
                 self.logger.warning(f"No data for {model_type.value}")
@@ -2057,10 +2103,13 @@ class ProductionTrainingPipeline:
             self.logger.info(f"  Data: {len(X):,} samples, {len(feature_names)} features")
             self.logger.info(f"  Feature matrix RAM: {ram_usage_gb:.2f} GB")
             
-            # Split data
-            split_idx = int(len(X) * (1 - self.config.test_size))
-            X_train, X_test = X[:split_idx], X[split_idx:]
-            y_train, y_test = y[:split_idx], y[split_idx:]
+            # Use TimeSeriesSplit for proper temporal validation
+            tscv = TimeSeriesSplit(n_splits=5)
+            fold_aucs = []
+            
+            for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X)):
+                X_train, X_test = X[train_idx], X[test_idx]
+                y_train, y_test = y[train_idx], y[test_idx]
             
             # Create and train model
             model = LightGBMTradingModel(model_type, self.config, self.logger)
@@ -2068,22 +2117,36 @@ class ProductionTrainingPipeline:
             
             model.train(X_train_scaled, y_train_arr)
             
-            # Evaluate
+            # Evaluate with multiclass AUC
             X_test_scaled = model.scaler.transform(X_test)
             y_pred = model.predict_proba(X_test_scaled)
             
             try:
-                auc = roc_auc_score(y_test, y_pred)
-            except:
+                # Use OVR (One-vs-Rest) for multiclass AUC
+                auc = roc_auc_score(y_test, y_pred, multi_class='ovr', average='weighted')
+            except Exception:
                 auc = 0.5
                 
-            self.logger.info(f"  AUC: {auc:.4f}")
+            fold_aucs.append(auc)
             
-            self.models[model_type] = model
-            results[model_type.value] = {'auc': auc, 'samples': len(X)}
+            # Only train on last fold (largest training set)
+            if fold_idx == tscv.n_splits - 1:
+                self.models[model_type] = model
+                
+            del X_train, X_test, y_train, y_test, X_train_scaled
+            
+            # Break after evaluating - use last fold for final model
+            if fold_idx < tscv.n_splits - 1:
+                del model
+                
+            # Log average AUC across folds
+            avg_auc = np.mean(fold_aucs) if fold_aucs else 0.5
+            self.logger.info(f"  Cross-validated AUC: {avg_auc:.4f} (5 folds)")
+            
+            results[model_type.value] = {'auc': avg_auc, 'samples': len(X)}
             
             # FREE MEMORY after each model
-            del X, y, X_train, X_test, y_train, y_test, X_train_scaled
+            del X, y, returns
             gc.collect()
             self.logger.info(f"  Memory freed after {model_type.value} training.")
             
@@ -2096,18 +2159,15 @@ class ProductionTrainingPipeline:
         self.logger.info("PHASE 4: RISK MODEL TRAINING")
         self.logger.info("=" * 60)
         
-        # Get combined data for risk training
-        X, y, feature_names = self._get_training_data_with_features(ModelType.INTRADAY)
+        # Get combined data for risk training (now returns 4 values including actual returns)
+        X, y, returns, feature_names = self._get_training_data_with_features(ModelType.INTRADAY)
         
         if len(X) == 0:
             self.logger.error("No data available for risk model training")
             return {}
         
         self.logger.info(f"Risk model data: {len(X):,} samples")
-        
-        # Compute returns from close prices
-        # For now use random returns as placeholder (close prices are transformed)
-        returns = np.random.randn(len(X)) * 0.01  # Placeholder
+        self.logger.info(f"Returns stats: mean={returns.mean()*100:.3f}%, std={returns.std()*100:.3f}%")
         
         # Create risk model
         self.risk_model = RiskModel(self.config, self.logger)
@@ -2117,21 +2177,27 @@ class ProductionTrainingPipeline:
         
         self.logger.info(f"Risk events: {y_risk.sum():,} ({y_risk.mean()*100:.1f}%)")
         
-        # Split data
-        split_train = int(len(X) * 0.7)
-        split_val = int(len(X) * 0.85)
+        # Use TimeSeriesSplit for proper temporal validation
+        tscv = TimeSeriesSplit(n_splits=3)
+        splits = list(tscv.split(X))
         
-        X_train = X[:split_train]
-        X_val = X[split_train:split_val]
-        X_test = X[split_val:]
+        # Use 70% train, 15% val, 15% test from the last split
+        train_idx, test_idx = splits[-1]
+        val_split = int(len(train_idx) * 0.85)
+        val_idx = train_idx[val_split:]
+        train_idx = train_idx[:val_split]
         
-        y_train = y_risk[:split_train]
-        y_val = y_risk[split_train:split_val]
-        y_test = y_risk[split_val:]
+        X_train = X[train_idx]
+        X_val = X[val_idx]
+        X_test = X[test_idx]
         
-        returns_train = returns[:split_train]
-        returns_val = returns[split_train:split_val]
-        returns_test = returns[split_val:]
+        y_train = y_risk[train_idx]
+        y_val = y_risk[val_idx]
+        y_test = y_risk[test_idx]
+        
+        returns_train = returns[train_idx]
+        returns_val = returns[val_idx]
+        returns_test = returns[test_idx]
         
         # Prepare data
         X_train_scaled, y_train_arr = self.risk_model.prepare_data(X_train, y_train, feature_names)

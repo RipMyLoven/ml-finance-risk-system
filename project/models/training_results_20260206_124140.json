@@ -1,0 +1,16 @@
+{
+  "trading_models": {
+    "scalp": {
+      "auc": 0.7189112058609664,
+      "accuracy": 0.5877,
+      "samples": 50000,
+      "n_features": 194
+    },
+    "intraday": {
+      "auc": 0.7348748339673704,
+      "accuracy": 0.7095,
+      "samples": 50000,
+      "n_features": 194
+    }
+  }
+}
