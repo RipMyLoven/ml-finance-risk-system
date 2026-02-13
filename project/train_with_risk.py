@@ -84,9 +84,11 @@ os.environ['POLARS_MAX_THREADS'] = str(N_CORES_TO_USE)
 
 import numpy as np
 import polars as pl
+import numba
+from numba import njit, prange
 
 # Configure Polars for maximum performance
-pl.Config.set_streaming_chunk_size(50_000_000)  # 50M rows per chunk for streaming
+pl.Config.set_streaming_chunk_size(100_000_000)  # 100M rows per chunk for streaming
 pl.Config.set_fmt_str_lengths(100)
 
 from scipy import stats
@@ -1133,13 +1135,27 @@ class PolarsDataLoader:
                        'interval', 'market_type', 'close_time']
         feature_cols = [c for c in df.columns if c not in exclude_cols]
         
-        X = df.select(feature_cols).to_numpy().astype(np.float32)
-        y = df.select('target').to_numpy().flatten()
-        returns = df.select('future_return').to_numpy().flatten().astype(np.float32)
+        # Handle NaN/Inf in Polars (parallel on all cores) BEFORE converting to numpy
+        clean_exprs = [
+            pl.when(pl.col(c).is_nan() | pl.col(c).is_infinite())
+              .then(pl.lit(0.0))
+              .otherwise(pl.col(c))
+              .cast(pl.Float32)
+              .alias(c)
+            for c in feature_cols
+        ]
+        df_clean = df.select(clean_exprs)
+        X = df_clean.to_numpy()
+        del df_clean
         
-        # Handle NaN/Inf
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-        returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
+        y = df.select('target').to_numpy().flatten()
+        
+        returns = df.select(
+            pl.when(pl.col('future_return').is_nan() | pl.col('future_return').is_infinite())
+              .then(pl.lit(0.0))
+              .otherwise(pl.col('future_return'))
+              .cast(pl.Float32)
+        ).to_numpy().flatten()
         
         return X, y, returns
 
@@ -1392,6 +1408,90 @@ class PolarsFeatureEngine:
 # TRADING MODEL BASE CLASS
 # ==============================================================================
 
+# ==============================================================================
+# PARALLEL DATA UTILITIES (replace single-threaded sklearn/numpy ops)
+# ==============================================================================
+
+@njit(parallel=True, cache=True, fastmath=True)
+def parallel_nan_to_num(X: np.ndarray) -> np.ndarray:
+    """Replace NaN/Inf in-place using all CPU cores via numba."""
+    rows, cols = X.shape
+    for j in prange(cols):
+        for i in range(rows):
+            v = X[i, j]
+            if np.isnan(v) or np.isinf(v):
+                X[i, j] = 0.0
+    return X
+
+
+@njit(parallel=True, cache=True, fastmath=True)
+def parallel_nan_to_num_1d(arr: np.ndarray) -> np.ndarray:
+    """Replace NaN/Inf in 1D array using all CPU cores."""
+    n = arr.shape[0]
+    for i in prange(n):
+        v = arr[i]
+        if np.isnan(v) or np.isinf(v):
+            arr[i] = 0.0
+    return arr
+
+
+def parallel_robust_scale(X: np.ndarray, n_threads: int = 48) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Parallel RobustScaler using Polars (median + IQR on all cores).
+    
+    Returns:
+        X_scaled, medians, iqrs  (medians/iqrs kept for transform on val/test)
+    """
+    n_samples, n_features = X.shape
+    
+    # Convert to Polars DataFrame — Polars uses all available cores for aggregations
+    col_names = [f'f{i}' for i in range(n_features)]
+    df = pl.DataFrame({
+        col_names[i]: pl.Series(X[:, i]) for i in range(n_features)
+    })
+    
+    # Compute median and IQR in parallel (Polars dispatches across all cores)
+    median_exprs = [pl.col(c).median().alias(f'{c}_med') for c in col_names]
+    q25_exprs = [pl.col(c).quantile(0.25).alias(f'{c}_q25') for c in col_names]
+    q75_exprs = [pl.col(c).quantile(0.75).alias(f'{c}_q75') for c in col_names]
+    
+    stats = df.select(median_exprs + q25_exprs + q75_exprs)
+    
+    medians = np.array([stats[f'f{i}_med'][0] for i in range(n_features)], dtype=np.float32)
+    q25 = np.array([stats[f'f{i}_q25'][0] for i in range(n_features)], dtype=np.float32)
+    q75 = np.array([stats[f'f{i}_q75'][0] for i in range(n_features)], dtype=np.float32)
+    iqrs = q75 - q25
+    iqrs[iqrs < 1e-10] = 1.0  # prevent division by zero
+    
+    # Scale in Polars (parallel) — (X - median) / IQR
+    scale_exprs = [
+        ((pl.col(col_names[i]) - float(medians[i])) / float(iqrs[i])).cast(pl.Float32).alias(col_names[i])
+        for i in range(n_features)
+    ]
+    df_scaled = df.select(scale_exprs)
+    
+    X_scaled = df_scaled.to_numpy()
+    del df, df_scaled
+    
+    return X_scaled, medians, iqrs
+
+
+def parallel_robust_transform(X: np.ndarray, medians: np.ndarray, iqrs: np.ndarray) -> np.ndarray:
+    """Apply pre-computed robust scaling using Polars (parallel)."""
+    n_samples, n_features = X.shape
+    col_names = [f'f{i}' for i in range(n_features)]
+    df = pl.DataFrame({
+        col_names[i]: pl.Series(X[:, i]) for i in range(n_features)
+    })
+    scale_exprs = [
+        ((pl.col(col_names[i]) - float(medians[i])) / float(iqrs[i])).cast(pl.Float32).alias(col_names[i])
+        for i in range(n_features)
+    ]
+    df_scaled = df.select(scale_exprs)
+    X_scaled = df_scaled.to_numpy()
+    del df, df_scaled
+    return X_scaled
+
+
 class BaseTradingModel:
     """Base class for all trading models."""
     
@@ -1400,17 +1500,25 @@ class BaseTradingModel:
         self.config = config
         self.logger = logger
         self.model = None
-        self.scaler = RobustScaler()
+        self.scaler_medians: Optional[np.ndarray] = None
+        self.scaler_iqrs: Optional[np.ndarray] = None
         self.feature_names: List[str] = []
         self.is_trained = False
         
     def prepare_data(self, X: np.ndarray, y: np.ndarray, feature_names: List[str] = None) -> Tuple[np.ndarray, np.ndarray]:
-        """Prepare data for training."""
-        # Handle NaN/Inf
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        """Prepare data for training — fully parallel (Polars + numba)."""
+        if self.logger:
+            self.logger.info(f"  Cleaning NaN/Inf ({X.shape[0]:,} x {X.shape[1]}) parallel...")
         
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X)
+        # Handle NaN/Inf — parallel via numba (uses all cores)
+        X = np.ascontiguousarray(X, dtype=np.float32)
+        parallel_nan_to_num(X)
+        
+        if self.logger:
+            self.logger.info(f"  Scaling features (Polars parallel, {self.config.n_cpu} cores)...")
+        
+        # Scale features — parallel via Polars (uses all cores)
+        X_scaled, self.scaler_medians, self.scaler_iqrs = parallel_robust_scale(X, self.config.n_cpu)
         
         if feature_names:
             self.feature_names = feature_names
@@ -1438,7 +1546,7 @@ class LightGBMTradingModel(BaseTradingModel):
     def __init__(self, model_type: ModelType, config: SystemConfig, logger: RiskLogger):
         super().__init__(model_type, config, logger)
         
-        available_ram_mb = int(config.total_ram_gb * 1024 * 0.7)
+        available_ram_mb = int(config.total_ram_gb * 1024 * 0.85)
         
         self.lgb_params = {
             'objective': 'binary',
@@ -1457,7 +1565,7 @@ class LightGBMTradingModel(BaseTradingModel):
             'num_threads': config.n_cpu,
             'verbose': -1,
             'seed': config.random_seed,
-            'force_col_wise': True,
+            'force_row_wise': True,   # row-parallel: лучше для n_samples >> n_features на 48 ядрах
             'deterministic': False,
             'histogram_pool_size': available_ram_mb,
             'feature_fraction_bynode': config.feature_fraction_bynode,
@@ -1564,7 +1672,7 @@ class RiskModel(BaseTradingModel):
         self.cvar_calculator = CVaRCalculator(config.cvar_confidence, config.cvar_window)
         self.metrics = OptimizationMetrics()
         
-        available_ram_mb = int(config.total_ram_gb * 1024 * 0.5)
+        available_ram_mb = int(config.total_ram_gb * 1024 * 0.85)
         
         self.lgb_params = {
             'objective': 'binary',
@@ -1583,7 +1691,7 @@ class RiskModel(BaseTradingModel):
             'num_threads': config.n_cpu,
             'verbose': -1,
             'seed': config.random_seed,
-            'force_col_wise': True,
+            'force_row_wise': True,   # row-parallel: лучше для n_samples >> n_features на 48 ядрах
             'deterministic': False,
             'histogram_pool_size': available_ram_mb,
         }
@@ -2036,8 +2144,8 @@ class ProductionTrainingPipeline:
             (pl.col('future_return') > 0).cast(pl.Int32).alias('target')
         ])
         
-        # Smart sampling if too many rows (LightGBM is slow with >10M rows)
-        max_samples = 10_000_000  # 10M rows max for efficient training
+        # Smart sampling — with 48 cores and 300GB RAM можно обрабатывать больше данных
+        max_samples = 50_000_000  # 50M rows — 48 ядер + 300GB RAM позволяют
         if len(df) > max_samples:
             self.logger.info(f"  Sampling {max_samples:,} from {len(df):,} rows for efficient training...")
             # Stratified-like sampling: sample from each symbol proportionally
@@ -2050,22 +2158,30 @@ class ProductionTrainingPipeline:
         
         feature_cols = [c for c in df.columns if c not in exclude_cols and df[c].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]]
         
-        self.logger.info(f"  Converting to numpy ({len(feature_cols)} features)...")
+        self.logger.info(f"  Converting to numpy ({len(feature_cols)} features) — NaN/Inf cleanup in Polars (parallel)...")
         
-        # Convert to numpy efficiently - cast to Float32 in Polars first to avoid double copy
-        # Use rechunk for better memory layout
-        X_df = df.select([pl.col(c).cast(pl.Float32) for c in feature_cols]).rechunk()
+        # Handle NaN/Inf + cast to Float32 in Polars (fully parallel on all cores)
+        clean_exprs = [
+            pl.when(pl.col(c).is_nan() | pl.col(c).is_infinite())
+              .then(pl.lit(0.0))
+              .otherwise(pl.col(c))
+              .cast(pl.Float32)
+              .alias(c)
+            for c in feature_cols
+        ]
+        X_df = df.select(clean_exprs).rechunk()
         X = X_df.to_numpy()
         del X_df
         
         y = df.select('target').to_numpy().flatten().astype(np.int32)
         
-        # Extract actual returns for risk model
-        returns = df.select('future_return').to_numpy().flatten().astype(np.float32)
-        
-        # Handle NaN/Inf
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-        returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
+        # Extract actual returns for risk model (clean NaN/Inf in Polars)
+        returns = df.select(
+            pl.when(pl.col('future_return').is_nan() | pl.col('future_return').is_infinite())
+              .then(pl.lit(0.0))
+              .otherwise(pl.col('future_return'))
+              .cast(pl.Float32)
+        ).to_numpy().flatten()
         
         # Free DataFrame
         del df
@@ -2118,7 +2234,7 @@ class ProductionTrainingPipeline:
             model.train(X_train_scaled, y_train_arr)
             
             # Evaluate with multiclass AUC
-            X_test_scaled = model.scaler.transform(X_test)
+            X_test_scaled = parallel_robust_transform(X_test, model.scaler_medians, model.scaler_iqrs)
             y_pred = model.predict_proba(X_test_scaled)
             
             try:
@@ -2201,8 +2317,8 @@ class ProductionTrainingPipeline:
         
         # Prepare data
         X_train_scaled, y_train_arr = self.risk_model.prepare_data(X_train, y_train, feature_names)
-        X_val_scaled = self.risk_model.scaler.transform(X_val)
-        X_test_scaled = self.risk_model.scaler.transform(X_test)
+        X_val_scaled = parallel_robust_transform(X_val, self.risk_model.scaler_medians, self.risk_model.scaler_iqrs)
+        X_test_scaled = parallel_robust_transform(X_test, self.risk_model.scaler_medians, self.risk_model.scaler_iqrs)
         
         # Optuna optimization
         if OPTUNA_AVAILABLE:
