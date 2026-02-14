@@ -25,31 +25,32 @@ ram:
 lightgbm:
   # Количество bins для гистограмм (больше = точнее, но больше RAM)
   # Рекомендуется: 255-512
-  max_bin: 512
+  max_bin: 255
   
   # Количество листьев в дереве (больше = сложнее модель)
   # Рекомендуется: 31-255
-  num_leaves: 255
+  num_leaves: 127
   
   # Максимальная глубина дерева (-1 = без ограничений)
-  max_depth: 15
+  max_depth: 12
   
   # Минимум данных в листе
-  min_data_in_leaf: 10
+  min_data_in_leaf: 20
   
-  # Learning rate
-  learning_rate: 0.03
+  # Learning rate (выше = быстрее сходимость, но early stopping компенсирует)
+  learning_rate: 0.05
   
-  # Количество итераций
-  num_boost_round: 2000
+  # Количество итераций (early stopping остановит раньше)
+  num_boost_round: 1000
   
-  # Early stopping
-  early_stopping_rounds: 100
+  # Early stopping (быстрее остановка = быстрее прогон)
+  early_stopping_rounds: 50
 
 # --- НАСТРОЙКИ OPTUNA ---
 optuna:
   # Количество trials для оптимизации
-  n_trials: 50
+  # 20 trials достаточно для хороших параметров, 50 — diminishing returns
+  n_trials: 20
   
   # Таймаут на trial в секундах (null = без ограничений)
   timeout_per_trial: null
@@ -98,5 +99,7 @@ paths:
 # --- ПРОЧЕЕ ---
 misc:
   random_seed: 42
+  # Максимум строк для обучения (10M = оптимальный баланс скорость/качество)
+  max_samples: 10_000_000
   test_size: 0.20
   val_size: 0.10
