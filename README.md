@@ -67,7 +67,3 @@ python train_with_risk.py
 Install all dependencies via `pip install -r project/requirements.txt`.
 
 ---
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
