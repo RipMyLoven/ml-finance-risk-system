@@ -57,6 +57,17 @@ def load_config() -> dict:
 
 CONFIG = load_config()
 
+# Get script directory for resolving relative paths
+SCRIPT_DIR = Path(__file__).parent.resolve()
+
+# Helper function to resolve paths
+def resolve_path(path_str: str) -> Path:
+    """Resolve path relative to script directory."""
+    p = Path(path_str)
+    if p.is_absolute():
+        return p
+    return (SCRIPT_DIR / p).resolve()
+
 # Get CPU settings from config
 CPU_CONFIG = CONFIG.get('cpu', {})
 CPU_USAGE_PCT = CPU_CONFIG.get('usage_percent', 1.0)
@@ -87,8 +98,8 @@ import polars as pl
 import numba
 from numba import njit, prange
 
-# Configure Polars for maximum performance
-pl.Config.set_streaming_chunk_size(10_000_000)  # 10M rows per chunk for streaming
+# Configure Polars for maximum performance (REDUCED FOR WSL)
+pl.Config.set_streaming_chunk_size(1_000_000)  # 1M rows per chunk for streaming
 pl.Config.set_fmt_str_lengths(100)
 
 from scipy import stats
@@ -155,10 +166,10 @@ class SystemConfig:
     bin_construct_sample_cnt: int = 5000000
     max_cached_hist_node: int = 65536
     
-    # Data paths from config
-    data_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('data', '/home/ai/NogutiAI/aiTrainCrypto/data'))
-    model_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('models', '/home/ai/NogutiAI/aiTrainCrypto/project/models'))
-    cache_path: str = field(default_factory=lambda: CONFIG.get('paths', {}).get('cache', '/home/ai/NogutiAI/aiTrainCrypto/project/.cache'))
+    # Data paths from config (resolved relative to script)
+    data_path: str = field(default_factory=lambda: str(resolve_path(CONFIG.get('paths', {}).get('data', '../data'))))
+    model_path: str = field(default_factory=lambda: str(resolve_path(CONFIG.get('paths', {}).get('models', './models'))))
+    cache_path: str = field(default_factory=lambda: str(resolve_path(CONFIG.get('paths', {}).get('cache', './.cache'))))
     
     # Training settings from config
     random_seed: int = field(default_factory=lambda: CONFIG.get('misc', {}).get('random_seed', 42))
@@ -187,8 +198,21 @@ class SystemConfig:
     
     def __post_init__(self):
         self.n_jobs = self.n_cpu if self.n_jobs == -1 else self.n_jobs
-        os.makedirs(self.model_path, exist_ok=True)
-        os.makedirs(self.cache_path, exist_ok=True)
+        
+        # Create output directories
+        try:
+            os.makedirs(self.model_path, exist_ok=True)
+            os.makedirs(self.cache_path, exist_ok=True)
+        except PermissionError as e:
+            raise PermissionError(f"Cannot create directories - check permissions: {e}")
+        
+        # Verify data path exists
+        if not os.path.exists(self.data_path):
+            raise FileNotFoundError(
+                f"Data path does not exist: {self.data_path}\n"
+                f"Script dir: {SCRIPT_DIR}\n"
+                f"Expected relative to script: ../data"
+            )
 
 
 # ==============================================================================
@@ -960,7 +984,15 @@ class PolarsDataLoader:
                 symbols.add(symbol)
                 
         self.symbols = sorted(list(symbols))
-        self.logger.info(f"Discovered {len(self.symbols)} symbols")
+        
+        # Apply max_symbols limit from config for testing
+        max_symbols = CONFIG.get('misc', {}).get('max_symbols', None)
+        if max_symbols and max_symbols > 0:
+            self.symbols = self.symbols[:max_symbols]
+            self.logger.warning(f"Limited to {len(self.symbols)} symbols (max_symbols={max_symbols})")
+        else:
+            self.logger.info(f"Discovered {len(self.symbols)} symbols")
+        
         return self.symbols
     
     def _load_single_file(self, filepath: Path) -> Optional[pl.LazyFrame]:
@@ -1156,6 +1188,15 @@ class PolarsDataLoader:
               .otherwise(pl.col('future_return'))
               .cast(pl.Float32)
         ).to_numpy().flatten()
+        
+        # Apply max_samples limit from config for testing
+        max_samples = CONFIG.get('misc', {}).get('max_samples', None)
+        if max_samples and max_samples > 0 and len(X) > max_samples:
+            indices = np.random.choice(len(X), max_samples, replace=False)
+            X = X[indices]
+            y = y[indices]
+            returns = returns[indices]
+            self.logger.warning(f"Limited to {len(X)} samples (max_samples={max_samples})")
         
         return X, y, returns
 
@@ -2519,11 +2560,11 @@ def main():
         description='Production-grade Multi-Model Futures Trading System with Risk Engine (Polars)'
     )
     parser.add_argument('--data-path', type=str, 
-                       default='/home/ai/NogutiAI/aiTrainCrypto/data',
-                       help='Path to data directory')
+                       default=None,
+                       help='Path to data directory (if not set, uses config.yaml)')
     parser.add_argument('--model-path', type=str,
-                       default='/home/ai/NogutiAI/aiTrainCrypto/models',
-                       help='Path to save models')
+                       default=None,
+                       help='Path to save models (if not set, uses config.yaml)')
     parser.add_argument('--n-trials', '--trials', type=int, default=None,
                        help='Number of Optuna trials')
     parser.add_argument('--fast', action='store_true',
@@ -2535,10 +2576,14 @@ def main():
     
     args = parser.parse_args()
     
-    # Create config
+    # Create config from config.yaml
     config = SystemConfig()
-    config.data_path = args.data_path
-    config.model_path = args.model_path
+    
+    # Only override paths if explicitly provided
+    if args.data_path:
+        config.data_path = str(resolve_path(args.data_path))
+    if args.model_path:
+        config.model_path = str(resolve_path(args.model_path))
     
     # Override CPU settings from command line
     if args.cores:

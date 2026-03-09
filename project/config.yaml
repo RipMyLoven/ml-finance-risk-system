@@ -7,50 +7,51 @@
 # --- НАСТРОЙКИ CPU ---
 cpu:
   # Процент используемых ядер (0.1 - 1.0)
-  # 1.0 = все 48 ядер, 0.75 = 36 ядер, 0.5 = 24 ядра
-  usage_percent: 1.0
+  # WSL2: укажите exact_cores вместо usage_percent для стабильности
+  usage_percent: 0.50
   
   # Или укажите точное количество ядер (если указано, игнорирует usage_percent)
-  # exact_cores: 36
+  # ДЛЯ WSL2 РАСКОММЕНТИРУЙТЕ И УСТАНОВИТЕ ЗНАЧЕНИЕ СОГЛАСНО .wslconfig
+  exact_cores: 4
 
 # --- НАСТРОЙКИ RAM ---
 ram:
   # Процент используемой оперативной памяти (0.1 - 0.9)
-  usage_percent: 0.92
+  usage_percent: 0.70
   
   # Жёсткий лимит RAM в GB (если указано, ограничивает максимум)
-  max_gb: 300
+  # ДЛЯ WSL2 с 6GB оперативной памяти рекомендуется 4GB
+  max_gb: 4.0
 
 # --- НАСТРОЙКИ LightGBM ---
 lightgbm:
-  # Количество bins для гистограмм (больше = точнее, но больше RAM)
-  # Рекомендуется: 255-512
-  max_bin: 255
+  # Количество bins для гистограмм (WSL2 quicktest: 31, production: 255-512)
+  max_bin: 10
   
-  # Количество листьев в дереве (больше = сложнее модель)
-  # Рекомендуется: 31-255
-  num_leaves: 127
+  # Количество листьев в дереве (меньше = проще модель, меньше памяти)
+  # WSL2 quicktest: 31, production: 127-255
+  num_leaves: 10
   
-  # Максимальная глубина дерева (-1 = без ограничений)
-  max_depth: 12
+  # Максимальная глубина дерева
+  max_depth: 7
   
-  # Минимум данных в листе
-  min_data_in_leaf: 20
+  # Минимум данных в листе (больше = меньше памяти)
+  min_data_in_leaf: 100
   
-  # Learning rate (выше = быстрее сходимость, но early stopping компенсирует)
+  # Learning rate
   learning_rate: 0.05
   
-  # Количество итераций (early stopping остановит раньше)
-  num_boost_round: 1000
+  # Количество итераций (WSL2 quicktest: 50-100, production: 1000+)
+  num_boost_round: 50
   
-  # Early stopping (быстрее остановка = быстрее прогон)
-  early_stopping_rounds: 50
+  # Early stopping
+  early_stopping_rounds: 20
 
 # --- НАСТРОЙКИ OPTUNA ---
 optuna:
   # Количество trials для оптимизации
-  # 20 trials достаточно для хороших параметров, 50 — diminishing returns
-  n_trials: 20
+  # WSL2 quicktest: 1-2, production: 20-50
+  n_trials: 1
   
   # Таймаут на trial в секундах (null = без ограничений)
   timeout_per_trial: null
@@ -91,15 +92,19 @@ risk:
 
 # --- ПУТИ ---
 paths:
-  data: /home/ai/NogutiAI/aiTrainCrypto/data
-  models: /home/ai/NogutiAI/aiTrainCrypto/project/models
-  logs: /home/ai/NogutiAI/aiTrainCrypto/project/logs
-  cache: /home/ai/NogutiAI/aiTrainCrypto/project/.cache
+  # Укажите относительные пути от директории проекта
+  # На WSL2, Linux сервере и Windows все будут работать автоматически
+  data: ../data
+  models: ./models
+  logs: ./logs
+  cache: ./.cache
 
 # --- ПРОЧЕЕ ---
 misc:
   random_seed: 42
-  # Максимум строк для обучения (10M = оптимальный баланс скорость/качество)
-  max_samples: 10_000_000
+  # Максимум строк для обучения (для WSL2 quicktest: 50k, production: 2M+)
+  max_samples: 25000
+  # Максимум символов для обучения (для WSL2 quicktest: 5, production: 102)
+  max_symbols: 5
   test_size: 0.20
   val_size: 0.10
