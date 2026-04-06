@@ -1,0 +1,26 @@
+{
+  "mexc": {
+    "base_url": "https://api.mexc.com/api/v3",
+    "timeout_seconds": 15,
+    "max_retries": 3,
+    "retry_delay_seconds": 2
+  },
+  "timeframes": {
+    "scalp":    { "interval": "5m",  "limit": 350 },
+    "intraday": { "interval": "60m", "limit": 350 },
+    "swing":    { "interval": "1d",  "limit": 450 }
+  },
+  "models_dir": "../models",
+  "cache": {
+    "enabled": true,
+    "ttl_seconds": 60
+  },
+  "normalization": {
+    "method": "zscore_window",
+    "min_bars": 50
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  }
+}
