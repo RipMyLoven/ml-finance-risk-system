@@ -1,0 +1,10 @@
+# TUI requirements (production inference only)
+onnxruntime>=1.16.0
+onnx>=1.14.0
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+aiohttp>=3.9.0
+textual>=0.47.0
+rich>=13.7.0
+pyarrow>=14.0.0
