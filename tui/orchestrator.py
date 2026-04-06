@@ -84,6 +84,7 @@ class Orchestrator:
         self._disk_cache = DiskCache()
         self._ensemble = None  # Lazy loaded
         self._running = False
+        self._refresh_interval = 60.0
         self._force_refresh = asyncio.Event()
         self._notify_callback = None  # set by TUI
 
@@ -114,9 +115,11 @@ class Orchestrator:
     def force_refresh(self) -> None:
         self._force_refresh.set()
 
+    def set_refresh_interval(self, interval: float) -> None:
+        self._refresh_interval = max(10.0, interval)
+
     async def run_loop(self) -> None:
         """Main polling loop — runs as background task in the TUI event loop."""
-        refresh_interval = 60.0  # default for 5m candles
         while self._running:
             try:
                 if not self._state.paused:
@@ -135,7 +138,7 @@ class Orchestrator:
                 try:
                     await asyncio.wait_for(
                         self._force_refresh.wait(),
-                        timeout=refresh_interval,
+                        timeout=self._refresh_interval,
                     )
                     self._force_refresh.clear()
                 except asyncio.TimeoutError:
@@ -148,6 +151,8 @@ class Orchestrator:
                 self._state.last_error = str(exc)
                 self._state.status = "ERROR"
                 logger.error("Orchestrator error: %s", exc)
+                if self._notify_callback:
+                    self._notify_callback()
                 await asyncio.sleep(5)
 
     async def switch_symbol(self, symbol: str) -> None:
@@ -156,10 +161,14 @@ class Orchestrator:
         if not valid:
             self._state.last_error = f"Invalid symbol: {symbol}"
             self._state.error_count += 1
+            if self._notify_callback:
+                self._notify_callback()
             return
         self._state.symbol = symbol
         if symbol not in self._state.symbols:
             self._state.symbols.append(symbol)
+        # Clear memory cache to force fresh data for new symbol
+        await self._mem_cache.clear()
         self.force_refresh()
 
     async def search_symbols(self, query: str) -> list[str]:
@@ -185,6 +194,27 @@ class Orchestrator:
                 btc_df = await self._fetch_cached("BTCUSDT", tf["intraday"].interval, tf["intraday"].limit)
             except Exception:
                 pass
+
+        # Store price and ATR for signal panel
+        if intraday_df is not None and len(intraday_df) > 0:
+            self._state.last_price = float(intraday_df["close"].iloc[-1])
+            high = intraday_df["high"]
+            low = intraday_df["low"]
+            close_s = intraday_df["close"]
+            prev_close = close_s.shift(1)
+            tr = pd.concat([
+                high - low,
+                (high - prev_close).abs(),
+                (low - prev_close).abs(),
+            ], axis=1).max(axis=1)
+            atr_val = tr.rolling(14).mean().iloc[-1]
+            self._state.last_atr = float(atr_val) if pd.notna(atr_val) else 0.0
+
+            # Store chart data
+            self._state.chart_closes = intraday_df["close"].tolist()
+            self._state.chart_opens = intraday_df["open"].tolist()
+            self._state.chart_symbol = symbol
+            self._state.chart_interval = "1h"
 
         # Build features (CPU-bound, run synchronously in event loop
         # since ProcessPoolExecutor with pickle has overhead issues with pandas)

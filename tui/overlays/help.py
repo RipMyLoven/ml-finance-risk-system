@@ -1,57 +1,61 @@
 """
-overlays/help.py — Keybinding help overlay.
+overlays/help.py — btop-style help overlay.
 """
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Center, Vertical
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Static, Button
-
-
-_HELP_TEXT = """[bold]Keyboard Shortcuts[/]
-
-  [bold cyan]Q[/]         Quit (flush history first)
-  [bold cyan]R[/]         Force refresh (bypass cache)
-  [bold cyan]S[/]         Open symbol search
-  [bold cyan][ / ][/]     Decrease / increase timeframe
-  [bold cyan]1 / 2 / 3[/] Isolate scalp / intraday / swing model
-  [bold cyan]0[/]         Return to 3-model summary
-  [bold cyan]H[/]         Toggle history full-screen
-  [bold cyan]P[/]         Toggle pause mode
-  [bold cyan]?[/]         Show this help
-  [bold cyan]Escape[/]    Close overlay
-  [bold cyan]Ctrl+C[/]    Emergency exit
-"""
+from textual.widgets import Static
 
 
 class HelpOverlay(ModalScreen[None]):
     CSS = """
     HelpOverlay {
         align: center middle;
+        background: rgba(0, 0, 0, 0.65);
     }
-    #help-container {
-        width: 60;
+    #help-box {
+        width: 52;
         height: auto;
-        max-height: 80%;
-        border: thick $primary;
+        border: round $primary;
         background: $surface;
-        padding: 2;
+        padding: 1 2;
+    }
+    #help-title {
+        text-align: center;
+        margin-bottom: 1;
+    }
+    .help-row {
+        height: 1;
+        padding: 0 1;
+    }
+    #help-hint {
+        margin-top: 1;
+        text-align: center;
+        color: $text-muted;
     }
     """
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="help-container"):
-            yield Static(_HELP_TEXT)
-            with Center():
-                yield Button("Close", variant="primary", id="close-help")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "close-help":
-            self.dismiss(None)
+        keys = [
+            ("Esc", "Open menu (settings, themes, quit)"),
+            ("S", "Open symbol search"),
+            ("R", "Force refresh (bypass cache)"),
+            ("C", "Toggle price chart"),
+            ("P", "Cycle refresh preset (30s/60s/2m/5m)"),
+            ("1 / 2 / 3", "Isolate scalp / intraday / swing"),
+            ("0", "Show all models"),
+            ("Ctrl+Q", "Quit"),
+        ]
+        with Vertical(id="help-box"):
+            yield Static("[bold]Keyboard Shortcuts[/]", id="help-title")
+            for key, desc in keys:
+                yield Static(
+                    f"  [bold cyan]{key:<12}[/] {desc}",
+                    classes="help-row",
+                )
+            yield Static("[dim]Press Esc to close[/]", id="help-hint")
 
     def key_escape(self) -> None:
-        self.dismiss(None)
-
-    def key_question_mark(self) -> None:
         self.dismiss(None)

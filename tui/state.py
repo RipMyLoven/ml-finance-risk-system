@@ -51,6 +51,24 @@ class AppState:
     # Cache info
     last_cache_hit: bool = False
 
+    # Price / ATR for signal panel
+    last_price: float = 0.0
+    last_atr: float = 0.0
+
+    # Chart data
+    chart_closes: List[float] = field(default_factory=list)
+    chart_opens: List[float] = field(default_factory=list)
+    chart_symbol: str = ""
+    chart_interval: str = "1h"
+
+    # Panel visibility (toggled in settings)
+    show_chart: bool = True
+    show_signal: bool = True
+    show_history: bool = True
+
+    # Refresh interval (seconds)
+    refresh_interval: float = 60.0
+
     # History
     history: List[HistoryEntry] = field(default_factory=list)
 

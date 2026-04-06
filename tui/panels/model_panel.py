@@ -15,12 +15,13 @@ def _conf_bar(value: float, width: int = 15) -> str:
     return "[cyan]" + "█" * filled + "[/][dim]" + "░" * (width - filled) + "[/]"
 
 
-def _signal_color(signal: str) -> str:
+def _signal_color(signal: str, width: int = 8) -> str:
+    padded = signal.ljust(width)
     if signal in ("UP", "LONG"):
-        return f"[bold green]{signal}[/]"
+        return f"[bold green]{padded}[/]"
     if signal in ("DOWN", "SHORT"):
-        return f"[bold red]{signal}[/]"
-    return f"[yellow]{signal}[/]"
+        return f"[bold red]{padded}[/]"
+    return f"[yellow]{padded}[/]"
 
 
 class ModelPanel(Static):
@@ -58,9 +59,9 @@ class ModelPanel(Static):
     def render(self) -> str:
         lines = ["[bold]MODEL DETAIL[/]", ""]
 
-        header = f"  {'Model':<10} {'Signal':<8} {'Conf':<18} {'P↑':>6} {'P─':>6} {'P↓':>6} {'E[R]':>8}"
+        header = f"  {'Model':<10} {'Signal':<8} {'Conf':<17} {'P↑':>6} {'P─':>6} {'P↓':>6} {'E[R]':>8}"
         lines.append(header)
-        lines.append("  " + "─" * 68)
+        lines.append("  " + "─" * 66)
 
         names = ["SCALP", "INTRADAY", "SWING"]
         filter_map = {1: "SCALP", 2: "INTRADAY", 3: "SWING"}
@@ -79,7 +80,7 @@ class ModelPanel(Static):
             er = f"{pred.expected_return:+.4f}"
 
             lines.append(
-                f"  {name:<10} {sig:<20} {conf} "
+                f"  {name:<10} {sig} {conf} "
                 f"{pred.P_up:6.3f} {pred.P_flat:6.3f} {pred.P_down:6.3f} {er:>8}"
             )
 

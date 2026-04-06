@@ -33,17 +33,12 @@ class StatusBar(Static):
         self.refresh()
 
     def render(self) -> str:
-        age = f"DATA: {self._data_age:.0f}s ago"
-        cache = "[green]CACHE: HIT[/]" if self._cache_hit else "[yellow]CACHE: MISS[/]"
-        nxt = f"NEXT: {self._next_refresh:.0f}s"
+        age = f"[dim]data[/] {self._data_age:.0f}s"
+        cache = "[green]hit[/]" if self._cache_hit else "[yellow]miss[/]"
+        nxt = f"[dim]next[/] {self._next_refresh:.0f}s"
 
-        if self._error_count > 0:
-            err = f"[red]ERR: {self._error_count}[/]"
-        else:
-            err = "[dim]ERR: 0[/]"
+        err = f"[red]err {self._error_count}[/]" if self._error_count > 0 else ""
 
-        pause = "  [bold yellow]⏸ PAUSED[/]" if self._paused else ""
+        pause = " [bold yellow]PAUSED[/]" if self._paused else ""
 
-        keys = "[dim][Q]uit  [R]efresh  [S]ymbols  [1-3]Models  [?]Help[/]"
-
-        return f" {age}  │  {cache}  │  {nxt}  │  {err}{pause}  │  {keys}"
+        return f" {age}  {cache}  {nxt}  {err}{pause}"

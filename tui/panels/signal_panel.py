@@ -37,8 +37,26 @@ class SignalPanel(Static):
     def render(self) -> str:
         lines = ["[bold]SIGNAL[/]", ""]
 
-        if self._result is None or self._result.meta_signal == "NEUTRAL":
-            lines.append("  [dim]No active signal[/]")
+        if self._result is None:
+            lines.append("  [dim]Waiting for prediction data...[/]")
+            return "\n".join(lines)
+
+        r = self._result
+
+        if r.meta_signal == "NEUTRAL":
+            lines.append("  [yellow]◆ NEUTRAL[/] — No active trade signal")
+            lines.append("")
+            if self._price > 0:
+                lines.append(f"  Price:  [bold]${self._price:,.2f}[/]")
+            if r.meta_score != 0:
+                bias = "bullish" if r.meta_score > 0 else "bearish"
+                lines.append(f"  Bias:   [dim]{bias} ({r.meta_score:+.4f})[/]")
+            if r.risk:
+                lines.append(f"  Risk:   {r.risk.risk_level}  (max {r.risk.max_leverage_suggested:.0f}×)")
+            if r.errors:
+                lines.extend(["", "  [yellow]Warnings:[/]"])
+                for err in r.errors[:3]:
+                    lines.append(f"    • {err}")
             return "\n".join(lines)
 
         r = self._result
