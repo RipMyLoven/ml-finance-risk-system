@@ -50,6 +50,10 @@ pip install -r requirements.txt
 
 # Train all models with risk
 python train_with_risk.py
+
+# Run TUI
+python -m tui
+
 ```
 
 ---
